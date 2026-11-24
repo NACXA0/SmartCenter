@@ -1,0 +1,19 @@
+# SmartCenter — Home Assistant 配置（主干可随 uv 升级，业务在 custom_components）
+default_config:
+
+homeassistant:
+  name: 智慧办公室中央总控
+  language: zh-Hans
+  time_zone: Asia/Shanghai
+  unit_system: metric
+  currency: CNY
+  country: CN
+  internal_url: "http://smartcenter.lobn:8123"
+  # 外网 URL 如需再配；办公室默认内网
+
+logger:
+  default: info
+  logs:
+    custom_components.lobn_office: debug
+
+# lobn_office 通过 UI 配置流添加；勿在此写继电器 URL（放 secrets / 集成选项）

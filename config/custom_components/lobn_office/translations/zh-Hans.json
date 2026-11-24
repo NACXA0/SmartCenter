@@ -1,0 +1,31 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "智慧办公室",
+        "description": "配置门禁（唯一软件出口）、云端授权、监控事件 HMAC 与企业微信。",
+        "data": {
+          "door_adapter": "门禁适配器",
+          "open_url": "开门 URL",
+          "close_url": "关锁 URL",
+          "open_seconds": "开门秒数",
+          "door_method": "HTTP 方法",
+          "door_timeout": "超时秒数",
+          "cloud_base_url": "云端 API 根地址",
+          "cloud_hmac_secret": "云端 HMAC 密钥",
+          "cctv_event_hmac_secret": "监控事件 HMAC 密钥",
+          "cctv_enroll_url": "监控人脸入库 URL",
+          "cctv_enroll_hmac_secret": "监控入库 HMAC 密钥",
+          "wecom_webhook": "企业微信机器人 Webhook",
+          "night_face_mode": "夜间人脸模式",
+          "grant_prefetch_minutes": "授权预取分钟数",
+          "face_cooldown_sec": "人脸开门冷却秒",
+          "grant_cooldown_sec": "授权开门冷却秒"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "智慧办公室已配置"
+    }
+  }
+}

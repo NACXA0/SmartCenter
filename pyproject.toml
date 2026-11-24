@@ -1,0 +1,31 @@
+[project]
+name = "smartcenter"
+version = "0.1.0"
+description = "智慧办公室中央总控：Home Assistant + lobn_office 自定义集成"
+readme = "README.md"
+requires-python = ">=3.14.2"
+dependencies = [
+    "homeassistant==2026.11.3",
+    "httpx>=0.28",
+    "pydantic>=2.10",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.25",
+    "ruff>=0.8",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+pythonpath = ["config/custom_components", "."]
+
+[tool.ruff]
+line-length = 110
+target-version = "py314"

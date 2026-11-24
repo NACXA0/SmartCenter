@@ -1,0 +1,35 @@
+"""常量。"""
+
+DOMAIN = "lobn_office"
+PLATFORMS = ["lock"]
+
+SCHEMA_EVENT = "smartcctv.event.v1"
+SCHEMA_DOOR = "door.command.v1"
+SCHEMA_GRANT = "grant.v1"
+SCHEMA_GRANT_ACK = "grant.ack.v1"
+
+CONF_DOOR_ADAPTER = "door_adapter"
+CONF_OPEN_URL = "open_url"
+CONF_CLOSE_URL = "close_url"
+CONF_OPEN_SECONDS = "open_seconds"
+CONF_DOOR_METHOD = "door_method"
+CONF_DOOR_TIMEOUT = "door_timeout"
+CONF_CLOUD_BASE_URL = "cloud_base_url"
+CONF_CLOUD_HMAC = "cloud_hmac_secret"
+CONF_CCTV_EVENT_HMAC = "cctv_event_hmac_secret"
+CONF_CCTV_ENROLL_URL = "cctv_enroll_url"
+CONF_CCTV_ENROLL_HMAC = "cctv_enroll_hmac_secret"
+CONF_WECOM_WEBHOOK = "wecom_webhook"
+CONF_NIGHT_FACE_MODE = "night_face_mode"
+CONF_GRANT_PREFETCH_MIN = "grant_prefetch_minutes"
+CONF_FACE_COOLDOWN = "face_cooldown_sec"
+CONF_GRANT_COOLDOWN = "grant_cooldown_sec"
+
+ATTR_CONFIRM = "confirm_token"
+CONFIRM_OPEN = "CONFIRMED_OPEN"
+
+EVENT_FACE_KNOWN = "lobn_office_face_known"
+EVENT_FACE_UNKNOWN = "lobn_office_face_unknown"
+EVENT_ZONE = "lobn_office_zone_intrude"
+EVENT_LOITER = "lobn_office_loiter"
+EVENT_DOOR_RESULT = "lobn_office_door_result"

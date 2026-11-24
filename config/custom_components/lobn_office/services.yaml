@@ -1,0 +1,45 @@
+manual_open:
+  name: 手工开门
+  description: 店员确认后由总控发脉冲
+  fields:
+    actor:
+      name: 操作者
+      example: staff
+      default: service
+      selector:
+        text:
+
+refresh_grants:
+  name: 刷新授权
+  description: 立即从云端预取未来授权到内存
+
+disable_person:
+  name: 停用人员
+  description: 热名单立即失效，监控旧命中也不开门
+  fields:
+    person_id:
+      required: true
+      selector:
+        number:
+          min: 1
+          mode: box
+
+upsert_person:
+  name: 写入热名单
+  fields:
+    person_id:
+      required: true
+      selector:
+        number:
+          min: 1
+          mode: box
+    user_id:
+      selector:
+        text:
+    name:
+      selector:
+        text:
+    enabled:
+      default: true
+      selector:
+        boolean:
