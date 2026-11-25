@@ -1,12 +1,14 @@
 """常量。"""
 
 DOMAIN = "lobn_office"
-PLATFORMS = ["lock"]
+PLATFORMS = ["lock", "sensor", "binary_sensor"]
 
 SCHEMA_EVENT = "smartcctv.event.v1"
 SCHEMA_DOOR = "door.command.v1"
 SCHEMA_GRANT = "grant.v1"
 SCHEMA_GRANT_ACK = "grant.ack.v1"
+SCHEMA_ESP_SENSE = "esp.sense.v1"
+SCHEMA_ALERT = "alert.v1"
 
 CONF_DOOR_ADAPTER = "door_adapter"
 CONF_OPEN_URL = "open_url"
@@ -14,8 +16,12 @@ CONF_CLOSE_URL = "close_url"
 CONF_OPEN_SECONDS = "open_seconds"
 CONF_DOOR_METHOD = "door_method"
 CONF_DOOR_TIMEOUT = "door_timeout"
+CONF_ESP_BASE_URL = "esp_base_url"
+CONF_ESP_TOKEN = "esp_token"
 CONF_CLOUD_BASE_URL = "cloud_base_url"
 CONF_CLOUD_HMAC = "cloud_hmac_secret"
+CONF_STORE_ID = "store_id"
+CONF_ROOM_ID = "room_id"
 CONF_CCTV_EVENT_HMAC = "cctv_event_hmac_secret"
 CONF_CCTV_ENROLL_URL = "cctv_enroll_url"
 CONF_CCTV_ENROLL_HMAC = "cctv_enroll_hmac_secret"

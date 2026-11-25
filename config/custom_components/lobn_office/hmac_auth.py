@@ -77,12 +77,22 @@ def verify(
     return True, ""
 
 
-def make_headers(secret: str, method: str, path: str, body: bytes) -> dict[str, str]:
+def make_headers(
+    secret: str,
+    method: str,
+    path: str,
+    body: bytes,
+    *,
+    store_id: int | None = None,
+) -> dict[str, str]:
     ts = str(int(time.time()))
     nonce = str(uuid.uuid4())
-    return {
+    headers = {
         "X-Lobn-Timestamp": ts,
         "X-Lobn-Nonce": nonce,
         "X-Lobn-Signature": sign(secret, ts, nonce, method, path, body),
         "Content-Type": "application/json",
     }
+    if store_id is not None:
+        headers["X-Lobn-Store-Id"] = str(int(store_id))
+    return headers

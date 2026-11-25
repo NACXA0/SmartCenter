@@ -49,3 +49,71 @@ class CctvClient:
         except Exception as exc:
             _LOGGER.exception("监控入库失败")
             return {"ok": False, "error": str(exc)}
+
+    def _base(self) -> str:
+        if not self.enroll_url:
+            return ""
+        parsed = urlparse(self.enroll_url)
+        return f"{parsed.scheme}://{parsed.netloc}"
+
+    async def start_passage(self, command_id: str, seconds: float = 5) -> dict[str, Any]:
+        """通知监控开始采集通行窗口。"""
+        base = self._base()
+        if not base or not self.secret or not command_id:
+            return {"ok": False}
+        path = "/api/internal/passages/start"
+        body = __import__("json").dumps(
+            {"command_id": command_id, "seconds": min(float(seconds), 120)},
+            ensure_ascii=False,
+        ).encode()
+        headers = make_headers(self.secret, "POST", path, body)
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.post(f"{base}{path}", headers=headers, content=body)
+            if resp.status_code >= 300:
+                return {"ok": False, "error": f"HTTP {resp.status_code}"}
+            return resp.json() if resp.content else {"ok": True}
+        except Exception:
+            _LOGGER.exception("启动通行采集失败")
+            return {"ok": False}
+
+    async def stop_passage(self, command_id: str) -> dict[str, Any]:
+        base = self._base()
+        if not base or not self.secret or not command_id:
+            return {}
+        path = "/api/passages/stop"
+        body = __import__("json").dumps({"command_id": command_id}, ensure_ascii=False).encode()
+        headers = make_headers(self.secret, "POST", path, body)
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.post(f"{base}{path}", headers=headers, content=body)
+            if resp.status_code >= 300:
+                return {}
+            return resp.json() if resp.content else {}
+        except Exception:
+            _LOGGER.exception("结束通行采集失败")
+            return {}
+
+    async def capture_assist(self, source: str, seconds: float = 8) -> dict[str, Any]:
+        """唤醒门口摄像头认证捕捉（不是开门后的通行采集）。"""
+        base = self._base()
+        if not base or not self.secret:
+            return {"ok": False, "frames": 0}
+        path = "/api/internal/capture/assist"
+        body = __import__("json").dumps(
+            {"source": source, "seconds": min(float(seconds), 60)},
+            ensure_ascii=False,
+        ).encode()
+        headers = make_headers(self.secret, "POST", path, body)
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.post(f"{base}{path}", headers=headers, content=body)
+            if resp.status_code >= 300:
+                return {"ok": False, "frames": 0, "error": f"HTTP {resp.status_code}"}
+            data = resp.json() if resp.content else {}
+            data.setdefault("ok", True)
+            data.setdefault("frames", 0)
+            return data
+        except Exception:
+            _LOGGER.exception("认证捕捉失败")
+            return {"ok": False, "frames": 0}

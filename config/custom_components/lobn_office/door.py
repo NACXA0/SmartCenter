@@ -91,6 +91,100 @@ class HttpRelayAdapter(DoorAdapter):
             return False
 
 
+class EspDoorAdapter(DoorAdapter):
+    """POST door.command.v1 到 ESP；2xx 且 result=pulsed 才成功。"""
+
+    def __init__(
+        self,
+        base_url: str,
+        token: str,
+        timeout_sec: float = 3,
+    ) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.token = token
+        self.timeout_sec = timeout_sec
+        self.last_command_id: str = ""
+        self.offline: bool = False
+
+    def _headers(self) -> dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self.token}",
+            "Content-Type": "application/json",
+        }
+
+    async def open(self, seconds: float, command_id: str) -> bool:
+        if not self.base_url or not self.token:
+            return False
+        body = DoorCommand(
+            command_id=command_id,
+            action="open",
+            seconds=seconds,
+            reason="manual",
+            ts=time.time(),
+        ).model_dump(by_alias=True)
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout_sec) as client:
+                resp = await client.post(
+                    f"{self.base_url}/v1/door/command",
+                    headers=self._headers(),
+                    json=body,
+                )
+            if resp.status_code >= 300:
+                self.offline = resp.status_code >= 500
+                return False
+            data = resp.json() if resp.content else {}
+            ok = str(data.get("result", "")) == "pulsed"
+            if ok:
+                self.last_command_id = command_id
+                self.offline = False
+            return ok
+        except httpx.HTTPError as exc:
+            _LOGGER.warning("ESP 门禁失败: %s", exc)
+            self.offline = True
+            return False
+
+    async def close(self) -> bool:
+        if not self.base_url or not self.token:
+            return True
+        body = {
+            "schema": "door.command.v1",
+            "command_id": self.last_command_id or "close",
+            "action": "close",
+            "seconds": 0,
+            "ts": time.time(),
+        }
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout_sec) as client:
+                resp = await client.post(
+                    f"{self.base_url}/v1/door/command",
+                    headers=self._headers(),
+                    json=body,
+                )
+            return resp.status_code < 300
+        except httpx.HTTPError:
+            return False
+
+    async def state(self) -> str:
+        health = await self.health()
+        if not health:
+            self.offline = True
+            return "unknown"
+        self.offline = False
+        return str(health.get("door") or "unknown")
+
+    async def health(self) -> dict | None:
+        if not self.base_url:
+            return None
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout_sec) as client:
+                resp = await client.get(f"{self.base_url}/v1/health")
+            if resp.status_code >= 300:
+                return None
+            return resp.json() if resp.content else {}
+        except httpx.HTTPError:
+            return None
+
+
 @dataclass
 class DoorController:
     adapter: DoorAdapter

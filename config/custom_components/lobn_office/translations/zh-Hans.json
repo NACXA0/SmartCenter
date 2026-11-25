@@ -8,6 +8,8 @@
           "door_adapter": "门禁适配器",
           "open_url": "开门 URL",
           "close_url": "关锁 URL",
+          "esp_base_url": "ESP 门禁根地址",
+          "esp_token": "ESP Bearer Token",
           "open_seconds": "开门秒数",
           "door_method": "HTTP 方法",
           "door_timeout": "超时秒数",

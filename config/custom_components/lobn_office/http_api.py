@@ -1,8 +1,9 @@
-"""HTTP 入口：监控事件（HMAC）、店员手工开门（HA 鉴权）。"""
+"""HTTP 入口：监控事件（HMAC）、店员手工开门（HA 鉴权）、ESP sense。"""
 
 from __future__ import annotations
 
 import logging
+import secrets as pysecrets
 
 from aiohttp import web
 from homeassistant.components.http import HomeAssistantView
@@ -10,7 +11,7 @@ from homeassistant.core import HomeAssistant, callback
 
 from .const import DOMAIN
 from .hmac_auth import NonceCache, verify
-from .models import CctvEvent
+from .models import CctvEvent, EspSenseEvent
 
 _LOGGER = logging.getLogger(__name__)
 _NONCES = NonceCache()
@@ -138,8 +139,40 @@ class LobnLocalFaceEnrollView(HomeAssistantView):
         )
 
 
+class LobnEspSenseView(HomeAssistantView):
+    """POST /api/lobn_office/esp/sense — 仅 ESP Bearer token；绝不直接开门。"""
+
+    url = "/api/lobn_office/esp/sense"
+    name = "api:lobn_office:esp_sense"
+    requires_auth = False
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self.hass = hass
+
+    async def post(self, request: web.Request) -> web.Response:
+        runtime = self.hass.data.get(DOMAIN, {}).get("runtime")
+        if runtime is None:
+            return web.json_response({"ok": False, "error": "集成未就绪"}, status=503)
+        token = runtime.get("esp_token") or ""
+        auth = request.headers.get("Authorization", "")
+        expected = f"Bearer {token}"
+        if not token or not pysecrets.compare_digest(auth, expected):
+            return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
+        body = await request.read()
+        try:
+            event = EspSenseEvent.model_validate_json(body)
+        except Exception as exc:
+            return web.json_response({"ok": False, "error": f"载荷无效: {exc}"}, status=400)
+        sense = runtime.get("sense")
+        if sense is None:
+            return web.json_response({"ok": False, "error": "sense 未就绪"}, status=503)
+        result = await sense.handle(event)
+        return web.json_response(result)
+
+
 @callback
 def async_register_views(hass: HomeAssistant) -> None:
     hass.http.register_view(LobnEventsView(hass))
     hass.http.register_view(LobnManualOpenView(hass))
     hass.http.register_view(LobnLocalFaceEnrollView(hass))
+    hass.http.register_view(LobnEspSenseView(hass))

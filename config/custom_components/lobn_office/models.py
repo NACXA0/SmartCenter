@@ -74,3 +74,32 @@ class PersonRecord(BaseModel):
     user_id: str
     name: str
     enabled: bool = True
+
+
+class EspSenseEvent(BaseModel):
+    schema_name: str = Field(default="esp.sense.v1", alias="schema")
+    event_id: str
+    kind: Literal["telemetry", "pir", "button"]
+    edge: str = ""
+    temperature_c: float | None = None
+    humidity_pct: float | None = None
+    ts: float
+    device: dict[str, Any] = Field(default_factory=dict)
+
+    model_config = {"populate_by_name": True}
+
+
+class AlertRecord(BaseModel):
+    schema_name: str = Field(default="alert.v1", alias="schema")
+    alert_id: str
+    code: str
+    severity: Literal["warning", "critical"] = "warning"
+    source: str = "center"
+    sensor: str = ""
+    summary: str
+    state: Literal["open", "suppressed", "acked", "ignored", "recovered"] = "open"
+    handled_by: Literal["center", "admin"] = "center"
+    detail: dict[str, Any] = Field(default_factory=dict)
+    ts: float = 0
+
+    model_config = {"populate_by_name": True}

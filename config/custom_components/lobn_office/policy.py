@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
 
 from .audit import AuditLog
 from .door import DoorController, DoorResult
 from .hot_path import HotPathDecision, InMemoryHotPath
 from .models import CctvEvent, GrantAck
 from .notify import WeComNotifier
+
+if TYPE_CHECKING:
+    from .cloud_client import CloudClient
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -26,11 +31,14 @@ class AccessPolicy:
     audit: AuditLog
     night_face_mode: str = "stricter"  # stricter | alert_only
     on_ack: AckCallback | None = None
+    cloud: Any = None  # CloudClient | None；开门成功后上报里门状态
+    room_id: int = 1
     # 云端站点配置：人脸仅在有效预约窗口内自动开门（可选便利）
     face_auto_open: bool = True
     require_grant_for_face: bool = True
     _pending_face_grant: dict[str, float] = field(default_factory=dict)
     _unknown_cooldown: dict[str, float] = field(default_factory=dict)
+    _close_report_task: asyncio.Task | None = field(default=None, repr=False)
 
     def apply_site_settings(self, settings: dict) -> None:
         if "face_auto_open" in settings:
@@ -168,7 +176,35 @@ class AccessPolicy:
         self.audit.append("door_attempt", reason="manual", actor=actor)
         result, command_id = await self.door.open(reason="manual", person_name=actor)
         self.notify.submit(f"[门禁] 手工开门 result={result} by={actor}", level="info")
+        await self._report_inner_after_pulse(result)
         return {"action": result, "command_id": command_id}
+
+    async def _report_inner_after_pulse(self, result: DoorResult) -> None:
+        """脉冲成功：立即上报 open，open_seconds 后再上报 closed。
+
+        door.py：ok→opened，否则 unknown（超时/失败未区分）。
+        unknown 不假装 closed，也不报 fault。
+        """
+        cloud: CloudClient | None = self.cloud
+        if cloud is None:
+            return
+        if result != "opened":
+            # unknown：保持云端 unknown，不报 closed/fault
+            return
+        await cloud.report_door_status(self.room_id, inner_status="open")
+        if self._close_report_task and not self._close_report_task.done():
+            self._close_report_task.cancel()
+
+        async def _close_later() -> None:
+            try:
+                await asyncio.sleep(float(self.door.open_seconds))
+                await cloud.report_door_status(self.room_id, inner_status="closed")
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                _LOGGER.exception("上报里门 closed 失败")
+
+        self._close_report_task = asyncio.create_task(_close_later())
 
     async def _after_open(
         self,
@@ -182,6 +218,8 @@ class AccessPolicy:
             self.notify.submit(f"[门禁] 已开门 cmd={command_id}", level="info")
         elif result == "unknown":
             self.notify.submit(f"[门禁] 结果未知 cmd={command_id}", level="warning")
+
+        await self._report_inner_after_pulse(result)
 
         if grant_id and self.on_ack:
             first = result == "opened" and self.hot.mark_opened(grant_id)

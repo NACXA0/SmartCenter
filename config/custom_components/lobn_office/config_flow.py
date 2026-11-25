@@ -1,10 +1,9 @@
-"""配置流：UI 增量添加，不改 HA 主干。"""
+"""配置流：UI 增量添加，不改 HA 主干。每店独立 unique_id。"""
 
 from __future__ import annotations
 
 import voluptuous as vol
 from homeassistant import config_entries
-from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 
 from .const import (
@@ -17,21 +16,29 @@ from .const import (
     CONF_DOOR_ADAPTER,
     CONF_DOOR_METHOD,
     CONF_DOOR_TIMEOUT,
+    CONF_ESP_BASE_URL,
+    CONF_ESP_TOKEN,
     CONF_FACE_COOLDOWN,
     CONF_GRANT_COOLDOWN,
     CONF_GRANT_PREFETCH_MIN,
     CONF_NIGHT_FACE_MODE,
     CONF_OPEN_SECONDS,
     CONF_OPEN_URL,
+    CONF_ROOM_ID,
+    CONF_STORE_ID,
     CONF_WECOM_WEBHOOK,
     DOMAIN,
 )
 
 STEP_USER = vol.Schema(
     {
-        vol.Required(CONF_DOOR_ADAPTER, default="mock"): vol.In(["mock", "http"]),
+        vol.Required(CONF_STORE_ID, default=1): vol.Coerce(int),
+        vol.Optional(CONF_ROOM_ID, default=1): vol.Coerce(int),
+        vol.Required(CONF_DOOR_ADAPTER, default="mock"): vol.In(["mock", "http", "esp"]),
         vol.Optional(CONF_OPEN_URL, default=""): str,
         vol.Optional(CONF_CLOSE_URL, default=""): str,
+        vol.Optional(CONF_ESP_BASE_URL, default=""): str,
+        vol.Optional(CONF_ESP_TOKEN, default=""): str,
         vol.Optional(CONF_OPEN_SECONDS, default=5): vol.Coerce(float),
         vol.Optional(CONF_DOOR_METHOD, default="GET"): vol.In(["GET", "POST"]),
         vol.Optional(CONF_DOOR_TIMEOUT, default=3): vol.Coerce(float),
@@ -54,7 +61,15 @@ class LobnOfficeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_user(self, user_input: dict | None = None) -> FlowResult:
         if user_input is not None:
-            await self.async_set_unique_id(DOMAIN)
+            store_id = int(user_input.get(CONF_STORE_ID) or 1)
+            if store_id < 1:
+                return self.async_show_form(
+                    step_id="user",
+                    data_schema=STEP_USER,
+                    errors={"base": "invalid_store_id"},
+                )
+            await self.async_set_unique_id(f"{DOMAIN}_{store_id}")
             self._abort_if_unique_id_configured()
-            return self.async_create_entry(title="智慧办公室", data=user_input)
+            title = f"智慧办公室 · 店 {store_id}"
+            return self.async_create_entry(title=title, data=user_input)
         return self.async_show_form(step_id="user", data_schema=STEP_USER)
