@@ -1,34 +1,34 @@
-# SmartCenter · 智慧办公室中央总控
+# SmartCenter · 店内 HAOS 配置与集成
 
-基于 **Home Assistant 2026.11.3**（`requires-python >=3.14.2`），用官方 **自定义集成（custom_components）** 增量开发，**不修改 HA 主干**，升级只需改版本钉并 `uv sync`。
+生产形态见主仓 [docs/架构-HAOS四App.md](../docs/架构-HAOS四App.md)：
 
-内网域名建议：`smartcenter.lobn`，默认端口 `8123`。界面语言：`zh-Hans`。
+- 本仓库提供 **HA 配置目录**与（过渡期）`custom_components/lobn_office`
+- 目标：**HA 零智能**——保命自动化、实体、侧边栏 iframe（Frigate / sidecar）；分析与开门决策在 **analytics-sidecar**
+- 门禁执行：**ESPHome** ← MQTT `home/*/command`（旧 HTTP `door.command.v1` / 自研固件弃用中）
+- 监控：**Frigate**，不是 SmartCCTV（[归档决策](../docs/决策-归档自研SmartCCTV.md)）
 
-## 为什么不用整仓 fork
+基于 **Home Assistant**（见 `VERSION`），**不修改 HA 主干**。内网建议主机名走 HAOS；界面 `zh-Hans`。
 
-| 方式 | 升级成本 |
-|------|----------|
-| fork 改 `homeassistant/components/` | 每次合上游冲突多 |
-| **custom_components + 配置入口**（本仓库） | 主干只升依赖；业务全在 `lobn_office` |
-
-HA 提供的增量接口：Config Entry / Config Flow、Entity、HTTP View、Service、DataUpdateCoordinator、Intent/Conversation。
-
-## 快速开始
+## 快速开始（开发）
 
 ```bash
-./START.sh repair --yes   # uv + Python ≥3.14.2 + 依赖
+./START.sh repair --yes
 ./START.sh start          # uv run hass -c config
 ```
 
-浏览器打开 `http://smartcenter.lobn:8123`（或本机 `8123`）。首次按 HA 向导建用户，再在「设置 → 设备与服务」添加 **智慧办公室 (lobn_office)**。
+浏览器打开 `:8123`。生产请用 **HAOS Supervisor** 安装 Mosquitto、Frigate Full Access、sidecar，而不是仅靠本机 uvicorn 冒充全栈。
 
 ## 结构
 
-- `config/` — HA 配置目录（含 `custom_components/lobn_office`）
-- `config/custom_components/lobn_office/` — 自有集成（门禁唯一出口、监控事件入口、授权预取、企业微信、管家意图）
-- `tests/` — 热路径 / HMAC / 门禁 mock 单测（不依赖完整 HA）
-- `docs/部署说明.md` — systemd、密钥、TLS
+- `config/` — HA 配置（含 `custom_components/lobn_office`）
+- `firmware/esp32s3_door/` — 旧 HTTP 门固件；迁移目标 ESPHome
+- `docs/部署说明.md` — 部署与验收要点
+- 后续：`addons/analytics_sidecar/`（或独立仓）按架构文档脚手架
 
-## 职责
+## 职责边界
 
-软件开门**只**由本集成发往 ESP32ETH。监控只上报事件；云端只发授权单。详见主仓库 [`docs/接口契约.md`](../docs/接口契约.md)。
+| 在本仓 / HA | 不在本仓 |
+|-------------|----------|
+| 保命自动化、MQTT/ZHA、iframe、过渡期云端拉取 | Frigate 发行版、摄像头拉流、经营分析算法 |
+
+契约：[docs/接口契约.md](../docs/接口契约.md)。
