@@ -10,3 +10,4 @@ config/.HA_VERSION
 config/.lobn_audit/
 data/
 *.sqlite3
+export/

@@ -7,6 +7,7 @@ cd "$ROOT"
 CONFIG_DIR="$ROOT/config"
 PID_FILE="$ROOT/data/hass.pid"
 LOG_FILE="$ROOT/data/hass.log"
+EXPORT_DIR="$ROOT/export"
 YES=0
 CI=0
 
@@ -123,6 +124,56 @@ cmd_start() {
   echo "首次请在「设置 → 设备与服务」添加「智慧办公室」集成"
 }
 
+cmd_dev() {
+  # Center 无独立 Vite：开发=前台 HA，日志打终端
+  need_uv
+  ensure_dirs
+  [[ -d "$ROOT/.venv" ]] || cmd_repair
+  if is_running; then
+    echo "先停止后台 HA…"
+    cmd_stop
+  fi
+  echo "开发/前台：Home Assistant → $CONFIG_DIR"
+  echo "面板 http://127.0.0.1:8123  · Ctrl+C 停止"
+  echo "----------------------------------------"
+  uv run hass -c "$CONFIG_DIR"
+}
+
+cmd_export() {
+  # 无独立 frontend.zip：管理 Web = HA 自带 UI + lobn_office
+  ensure_dirs
+  mkdir -p "$EXPORT_DIR"
+  local stamp stage out
+  stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  out="$EXPORT_DIR/center-${stamp}.zip"
+  stage="$(mktemp -d)"
+  echo "=== 导出 SmartCenter 运行包（不含 secrets / .venv / 存储）==="
+  mkdir -p "$stage/SmartCenter/config" "$stage/SmartCenter/data"
+  rsync -a \
+    --exclude '__pycache__' --exclude '*.pyc' \
+    "$CONFIG_DIR/custom_components" \
+    "$stage/SmartCenter/config/"
+  [[ -f "$CONFIG_DIR/configuration.yaml" ]] && cp "$CONFIG_DIR/configuration.yaml" "$stage/SmartCenter/config/"
+  [[ -f "$CONFIG_DIR/secrets.yaml.example" ]] && cp "$CONFIG_DIR/secrets.yaml.example" "$stage/SmartCenter/config/"
+  for f in pyproject.toml START.sh VERSION README.md; do
+    [[ -f "$ROOT/$f" ]] && cp "$ROOT/$f" "$stage/SmartCenter/"
+  done
+  [[ -f "$ROOT/uv.lock" ]] && cp "$ROOT/uv.lock" "$stage/SmartCenter/"
+  cat >"$stage/SmartCenter/README-RUN.txt" <<'EOF'
+SmartCenter 运行包
+1. uv sync
+2. cp config/secrets.yaml.example config/secrets.yaml && chmod 600 …
+3. ./START.sh start   # 或「开发」前台
+管理 Web = Home Assistant :8123（无单独 Vite 前端包）
+业务集成: config/custom_components/lobn_office
+EOF
+  (cd "$stage" && zip -qr "$out" SmartCenter)
+  ln -sfn "$(basename "$out")" "$EXPORT_DIR/center.zip"
+  echo "[OK] $out"
+  echo "软链: $EXPORT_DIR/center.zip"
+  rm -rf "$stage"
+}
+
 cmd_stop() {
   if ! is_running; then
     echo "未运行"
@@ -177,11 +228,12 @@ SmartCenter = Home Assistant（uv 依赖）+ custom_components/lobn_office
 升级 HA：改 pyproject.toml / VERSION 中版本后执行「环境修复」
 
 交互菜单：
-  启动   启动 HA / 杀死进程
+  启动   后台 HA / 开发(前台) / 导出运行包 / 杀死进程
   运维   状态 / 日志 / 校验密钥权限 / 帮助
   环境   环境检测 / 环境修复 / 自动化测试
 
-子命令: diagnose | repair | start | stop | status | logs | secrets | test | help
+说明: 管理 Web 即 HA 面板，无独立 Vite；导出仅 center.zip。
+子命令: diagnose | repair | start | dev | export | stop | status | logs | secrets | test | help
 域名建议: smartcenter.lobn → 本机
 EOF
 }
@@ -201,14 +253,18 @@ menu_start() {
     clear_screen
     cat <<EOF
 SmartCenter · 启动
-  1) 启动 Home Assistant
-  2) 杀死进程
+  1) 后台启动 Home Assistant
+  2) 开发（前台 HA，终端；管理 Web 即 HA）
+  3) 导出运行包（center.zip，无独立前端包）
+  4) 杀死进程
   0) 返回上级
 EOF
     read -r -p "> " c
     case "$c" in
       1) run_action "启动 HA" cmd_start ;;
-      2) run_action "杀死进程" cmd_stop ;;
+      2) clear_screen; echo "SmartCenter · 开发"; echo "----------------------------------------"; cmd_dev || true; pause_back ;;
+      3) run_action "导出运行包" cmd_export ;;
+      4) run_action "杀死进程" cmd_stop ;;
       0) return 0 ;;
       *) ;;
     esac
@@ -287,6 +343,8 @@ main() {
     diagnose) cmd_diagnose ;;
     repair|install) cmd_repair ;;
     start) cmd_start ;;
+    dev|start-fg) cmd_dev ;;
+    export) cmd_export ;;
     stop|kill) cmd_stop ;;
     restart) cmd_stop; cmd_start ;;
     status) cmd_status ;;
