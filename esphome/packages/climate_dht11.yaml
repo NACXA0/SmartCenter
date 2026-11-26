@@ -1,0 +1,13 @@
+# DHT11 温湿度
+
+sensor:
+  - platform: dht
+    pin: ${pin_dht}
+    model: DHT11
+    temperature:
+      name: "Classroom temperature"
+      id: room_temperature
+    humidity:
+      name: "Classroom humidity"
+      id: room_humidity
+    update_interval: 30s

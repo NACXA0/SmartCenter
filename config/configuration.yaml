@@ -10,6 +10,8 @@ homeassistant:
   country: CN
   internal_url: "http://smartcenter.lobn:8123"
   # 外网 URL 如需再配；办公室默认内网
+  packages:
+    rfid_asset_guard: !include packages/rfid_asset_guard.yaml
 
 logger:
   default: info
@@ -17,3 +19,4 @@ logger:
     custom_components.lobn_office: debug
 
 # lobn_office 通过 UI 配置流添加；勿在此写继电器 URL（放 secrets / 集成选项）
+# RFID 资产防盗：packages/rfid_asset_guard.yaml（仅店内 HA，不进 FireClassroom）

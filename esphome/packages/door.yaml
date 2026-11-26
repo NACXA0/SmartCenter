@@ -1,0 +1,51 @@
+# 门禁执行：订 home/<room>/door/command，脉冲继电器；上报 state
+
+switch:
+  - platform: gpio
+    id: door_relay
+    name: "Door relay"
+    pin: ${pin_door_relay}
+    restore_mode: ALWAYS_OFF
+    internal: true
+
+binary_sensor:
+  - platform: gpio
+    id: door_contact
+    name: "Door contact"
+    pin:
+      number: ${pin_door_contact}
+      mode: INPUT_PULLUP
+      inverted: true
+    device_class: door
+    on_press:
+      - mqtt.publish:
+          topic: home/${room_id}/door/state
+          payload: "open"
+    on_release:
+      - mqtt.publish:
+          topic: home/${room_id}/door/state
+          payload: "closed"
+
+script:
+  - id: door_open_pulse
+    mode: single
+    then:
+      - switch.turn_on: door_relay
+      - delay: 3s
+      - switch.turn_off: door_relay
+
+mqtt:
+  on_message:
+    - topic: home/${room_id}/door/command
+      then:
+        - lambda: |-
+            const std::string p = x;
+            bool open = (p == "OPEN");
+            if (!open && p.size() > 0 && p[0] == '{') {
+              open = p.find("\"OPEN\"") != std::string::npos
+                  || p.find("\"action\":\"OPEN\"") != std::string::npos
+                  || p.find("\"action\": \"OPEN\"") != std::string::npos;
+            }
+            if (open) {
+              id(door_open_pulse)->execute();
+            }

@@ -20,8 +20,9 @@
 
 ## 结构
 
-- `config/` — HA 配置（含 `custom_components/lobn_office`）
-- `firmware/esp32s3_door/` — 旧 HTTP 门固件；迁移目标 ESPHome
+- `config/` — HA 配置（含 `custom_components/lobn_office`、`packages/rfid_asset_guard.yaml`）
+- `esphome/` — **教室总控**（门 / DHT11 / RFID / 板载警号）；生产唯一固件形态
+- `firmware/esp32s3_door/` — 旧 HTTP 门固件；**勿新部署**
 - `docs/部署说明.md` — 部署与验收要点
 - 后续：`addons/analytics_sidecar/`（或独立仓）按架构文档脚手架
 
@@ -30,5 +31,6 @@
 | 在本仓 / HA | 不在本仓 |
 |-------------|----------|
 | 保命自动化、MQTT/ZHA、iframe、过渡期云端拉取 | Frigate 发行版、摄像头拉流、经营分析算法 |
+| **RFID 资产防盗**（ESPHome 比对 + HA 白名单/通知） | LOBN_FireClassroom / 小程序 / 云端台账 |
 
-契约：[docs/接口契约.md](../docs/接口契约.md)。
+RFID：[docs/资产防盗-RFID.md](../docs/资产防盗-RFID.md) · 契约：[docs/接口契约.md](../docs/接口契约.md)。

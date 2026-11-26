@@ -1,7 +1,9 @@
 # ESP32-S3 门禁固件（历史 · HTTP）
 
-> **迁移目标**：生产改用 **ESPHome**，经 MQTT `home/<door>/command` / `state` 执行与上报。  
-> 见主仓 [docs/架构-HAOS四App.md](../../../docs/架构-HAOS四App.md)。本目录保留作旧联调与单测参考，**新店不要再部署 HTTP 门协议**。
+> **迁移目标**：生产改用 **ESPHome 教室总控**  
+> → [SmartCenter/esphome/](../../esphome/)（门 + DHT11 + RFID + 板载警号，MQTT `home/<room>/…`）。  
+> 见主仓 [docs/架构-HAOS四App.md](../../../docs/架构-HAOS四App.md)、[docs/资产防盗-RFID.md](../../../docs/资产防盗-RFID.md)。  
+> 本目录保留作旧联调与单测参考，**新店不要再部署 HTTP 门协议**。
 
 旧链路：SmartCenter HTTP → 以太网 W5500 → ESP32-S3 → 继电器。
 

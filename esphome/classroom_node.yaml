@@ -1,0 +1,74 @@
+# 教室总控 — ESPHome（生产）
+# 一间教室一份：复制本文件，改 substitutions 后烧录。
+# 默认读头：RS485；警号：板载 GPIO。见 packages/、README.md。
+
+substitutions:
+  room_id: classroom_1
+  device_name: lobn-classroom-1
+  friendly_name: "教室1总控"
+  # 引脚按实板修改（下列为 ESP32-S3 占位）
+  pin_door_relay: GPIO4
+  pin_door_contact: GPIO5
+  pin_dht: GPIO6
+  pin_siren: GPIO7
+  pin_rs485_tx: GPIO17
+  pin_rs485_rx: GPIO18
+  pin_rs485_de: GPIO8
+  gate_id: exit
+  rfid_transport: rs485
+
+esphome:
+  name: ${device_name}
+  friendly_name: ${friendly_name}
+  comment: "LOBN classroom hub — door / DHT11 / RFID / siren"
+  project:
+    name: lobn.classroom_node
+    version: "0.1.0"
+
+esp32:
+  board: esp32-s3-devkitc-1
+  framework:
+    type: esp-idf
+
+logger:
+  level: INFO
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "${device_name}-fallback"
+    password: !secret ota_password
+
+captive_portal:
+
+mqtt:
+  id: mqtt_client
+  broker: !secret mqtt_broker
+  username: !secret mqtt_username
+  password: !secret mqtt_password
+  discovery: true
+  topic_prefix: home/${room_id}/node
+  # RFID allowlist / event 主题在 packages/rfid_core.yaml（home/<room>/rfid/*）
+
+time:
+  - platform: sntp
+    id: sntp_time
+    timezone: Asia/Shanghai
+
+packages:
+  door: !include packages/door.yaml
+  climate: !include packages/climate_dht11.yaml
+  siren: !include packages/siren.yaml
+  rfid_core: !include packages/rfid_core.yaml
+  rfid_rs485: !include packages/rfid_rs485.yaml
+  # 若该教室是韦根读头：注释上一行，改用
+  # rfid_wiegand: !include packages/rfid_wiegand.yaml.example

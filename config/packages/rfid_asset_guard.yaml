@@ -1,0 +1,136 @@
+# RFID 资产防盗 — HA 侧（白名单编辑 / 下发 / 通知）
+# 归属：仅 SmartCenter。不写 FireClassroom，不进 lobn_office 比对逻辑。
+# 文档：docs/资产防盗-RFID.md
+#
+# 默认教室：classroom_1。多教室时复制 input_* / automation，改 room 后缀与 MQTT 主题。
+
+input_text:
+  rfid_classroom_1_allowlist:
+    name: "教室1 RFID 白名单"
+    min: 0
+    max: 255
+    # 逗号分隔标签号，例：E2801160...,E2801160...
+  rfid_classroom_1_asset_note:
+    name: "教室1 资产备注（可选）"
+    min: 0
+    max: 255
+
+input_number:
+  rfid_classroom_1_allowlist_rev:
+    name: "教室1 白名单版本"
+    min: 1
+    max: 999999
+    step: 1
+    mode: box
+    initial: 1
+
+input_boolean:
+  rfid_classroom_1_armed:
+    name: "教室1 资产防盗布防"
+    icon: mdi:shield-home
+
+mqtt:
+  sensor:
+    - name: "教室1 最近 RFID 标签"
+      unique_id: rfid_classroom_1_last_tag
+      state_topic: "home/classroom_1/rfid/event"
+      value_template: "{{ value_json.tag_id | default('unknown') }}"
+      json_attributes_topic: "home/classroom_1/rfid/event"
+
+  binary_sensor:
+    - name: "教室1 RFID 未授权"
+      unique_id: rfid_classroom_1_unauthorized
+      state_topic: "home/classroom_1/rfid/event"
+      value_template: "{{ 'ON' if value_json.allowed == false else 'OFF' }}"
+      device_class: safety
+      off_delay: 30
+
+script:
+  rfid_classroom_1_publish_allowlist:
+    alias: "下发教室1 RFID 白名单"
+    mode: single
+    sequence:
+      - variables:
+          tags_raw: "{{ states('input_text.rfid_classroom_1_allowlist') | default('', true) }}"
+          tags_list: >-
+            {{ tags_raw.split(',')
+               | map('trim')
+               | reject('eq', '')
+               | list }}
+          rev: "{{ states('input_number.rfid_classroom_1_allowlist_rev') | int(1) }}"
+      - service: mqtt.publish
+        data:
+          topic: home/classroom_1/rfid/allowlist
+          retain: true
+          qos: 1
+          payload: >
+            {"schema":"home.rfid.allowlist.v1","room":"classroom_1","tags":{{ tags_list | tojson }},"rev":{{ rev }},"ts":{{ now().timestamp() | int }}}
+      - service: input_number.set_value
+        target:
+          entity_id: input_number.rfid_classroom_1_allowlist_rev
+        data:
+          value: "{{ rev | int + 1 }}"
+
+automation:
+  - id: rfid_classroom_1_allowlist_on_change
+    alias: "RFID 教室1 白名单变更即下发"
+    mode: queued
+    trigger:
+      - platform: state
+        entity_id: input_text.rfid_classroom_1_allowlist
+    action:
+      - service: script.rfid_classroom_1_publish_allowlist
+
+  - id: rfid_classroom_1_ha_start_resync
+    alias: "RFID 教室1 HA 启动重发白名单"
+    mode: single
+    trigger:
+      - platform: homeassistant
+        event: start
+    action:
+      - delay: "00:00:15"
+      - service: script.rfid_classroom_1_publish_allowlist
+
+  - id: rfid_classroom_1_unauthorized_notify
+    alias: "RFID 教室1 未授权报警通知"
+    mode: queued
+    trigger:
+      - platform: mqtt
+        topic: home/classroom_1/rfid/event
+    condition:
+      - condition: state
+        entity_id: input_boolean.rfid_classroom_1_armed
+        state: "on"
+      - condition: template
+        value_template: "{{ trigger.payload_json.allowed == false }}"
+    action:
+      - service: persistent_notification.create
+        data:
+          title: "资产防盗 · 教室1"
+          message: >-
+            未授权标签 {{ trigger.payload_json.tag_id }}
+            通道 {{ trigger.payload_json.gate }}
+            （板上已响警号）
+          notification_id: "rfid_classroom_1_unauthorized"
+      # 若已配置 notify 服务，取消注释：
+      # - service: notify.notify
+      #   data:
+      #     title: "资产防盗 · 教室1"
+      #     message: "未授权 {{ trigger.payload_json.tag_id }}"
+
+  - id: rfid_classroom_1_silence_ack
+    alias: "RFID 教室1 消警关闭通知"
+    mode: single
+    trigger:
+      - platform: event
+        event_type: call_service
+        event_data:
+          domain: persistent_notification
+          service: dismiss
+          service_data:
+            notification_id: rfid_classroom_1_unauthorized
+    action:
+      - service: mqtt.publish
+        data:
+          topic: home/classroom_1/rfid/silence
+          payload: "1"

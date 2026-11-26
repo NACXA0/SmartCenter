@@ -1,0 +1,142 @@
+# RFID 核心：HA retained 白名单缓存 + 本地比对 + 上报 event
+# 读头驱动（RS485/韦根）调用 script rfid_handle_tag，传入 tag_id。
+
+globals:
+  - id: rfid_allowlist_csv
+    type: std::string
+    restore_value: yes
+    initial_value: '""'
+  - id: rfid_allowlist_rev
+    type: int
+    restore_value: yes
+    initial_value: "0"
+  - id: rfid_last_tag
+    type: std::string
+    initial_value: '""'
+
+text_sensor:
+  - platform: template
+    name: "RFID last tag"
+    id: rfid_last_tag_sensor
+    update_interval: never
+
+  - platform: template
+    name: "RFID allowlist rev"
+    id: rfid_allowlist_rev_sensor
+    lambda: |-
+      return str_sprintf("%d", id(rfid_allowlist_rev));
+    update_interval: 60s
+
+binary_sensor:
+  - platform: template
+    name: "RFID unauthorized"
+    id: rfid_unauthorized
+    device_class: safety
+
+script:
+  - id: rfid_handle_tag
+    parameters:
+      tag_id: string
+    mode: queued
+    max_runs: 8
+    then:
+      - lambda: |-
+          id(rfid_last_tag) = tag_id;
+          id(rfid_last_tag_sensor).publish_state(tag_id);
+
+          bool allowed = false;
+          const std::string &csv = id(rfid_allowlist_csv);
+          if (!tag_id.empty() && !csv.empty()) {
+            // 逗号分隔精确匹配；两端加逗号避免子串误中
+            const std::string needle = "," + tag_id + ",";
+            const std::string hay = "," + csv + ",";
+            allowed = hay.find(needle) != std::string::npos;
+          }
+
+          id(rfid_unauthorized).publish_state(!allowed);
+
+          // home.rfid.event.v1（精简内联 JSON；正式样例见 docs/contracts）
+          double ts = 0;
+          if (id(sntp_time).now().is_valid())
+            ts = id(sntp_time).now().timestamp;
+
+          char event_id[40];
+          snprintf(event_id, sizeof(event_id), "%s-%ld", tag_id.c_str(), (long)ts);
+
+          std::string payload = str_sprintf(
+            "{\"schema\":\"home.rfid.event.v1\",\"event_id\":\"%s\",\"room\":\"%s\",\"gate\":\"%s\","
+            "\"tag_id\":\"%s\",\"allowed\":%s,\"transport\":\"%s\",\"ts\":%.0f}",
+            event_id,
+            "${room_id}",
+            "${gate_id}",
+            tag_id.c_str(),
+            allowed ? "true" : "false",
+            "${rfid_transport}",
+            ts
+          );
+          id(mqtt_client).publish(
+            /*topic=*/"home/${room_id}/rfid/event",
+            /*payload=*/payload,
+            /*qos=*/0,
+            /*retain=*/false
+          );
+
+          if (!allowed) {
+            id(siren_pulse)->execute();
+          }
+
+mqtt:
+  on_message:
+    - topic: home/${room_id}/rfid/allowlist
+      then:
+        - lambda: |-
+            // 接受 home.rfid.allowlist.v1 JSON，或纯逗号分隔 tags
+            std::string tags_csv;
+            int rev = id(rfid_allowlist_rev);
+            if (x.size() > 0 && x[0] == '{') {
+              auto extract_array = [&](const char *key) -> std::string {
+                std::string out;
+                size_t k = x.find(key);
+                if (k == std::string::npos) return out;
+                size_t lb = x.find('[', k);
+                size_t rb = x.find(']', lb);
+                if (lb == std::string::npos || rb == std::string::npos) return out;
+                std::string arr = x.substr(lb + 1, rb - lb - 1);
+                std::string cur;
+                bool in_str = false;
+                for (char c : arr) {
+                  if (c == '"') { in_str = !in_str; continue; }
+                  if (!in_str && c == ',') {
+                    if (!cur.empty()) {
+                      if (!out.empty()) out += ",";
+                      out += cur;
+                      cur.clear();
+                    }
+                    continue;
+                  }
+                  if (in_str) cur += c;
+                }
+                if (!cur.empty()) {
+                  if (!out.empty()) out += ",";
+                  out += cur;
+                }
+                return out;
+              };
+              tags_csv = extract_array("\"tags\"");
+              size_t rk = x.find("\"rev\"");
+              if (rk != std::string::npos) {
+                size_t colon = x.find(':', rk);
+                if (colon != std::string::npos) rev = atoi(x.c_str() + colon + 1);
+              }
+            } else {
+              tags_csv = x;
+              tags_csv.erase(
+                std::remove_if(tags_csv.begin(), tags_csv.end(), ::isspace),
+                tags_csv.end()
+              );
+              rev += 1;
+            }
+            id(rfid_allowlist_csv) = tags_csv;
+            id(rfid_allowlist_rev) = rev;
+            id(rfid_allowlist_rev_sensor).publish_state(str_sprintf("%d", rev));
+            ESP_LOGI("rfid", "allowlist updated rev=%d tags=%s", rev, tags_csv.c_str());

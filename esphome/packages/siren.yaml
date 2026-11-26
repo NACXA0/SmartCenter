@@ -1,0 +1,29 @@
+# 板载 GPIO 警号（默认选型：不另接独立警号控制器）
+
+switch:
+  - platform: gpio
+    id: siren
+    name: "RFID siren"
+    pin: ${pin_siren}
+    restore_mode: ALWAYS_OFF
+
+script:
+  - id: siren_pulse
+    mode: restart
+    then:
+      - switch.turn_on: siren
+      - delay: 5s
+      - switch.turn_off: siren
+
+button:
+  - platform: template
+    name: "Silence siren"
+    id: silence_siren
+    on_press:
+      - switch.turn_off: siren
+
+mqtt:
+  on_message:
+    - topic: home/${room_id}/rfid/silence
+      then:
+        - switch.turn_off: siren

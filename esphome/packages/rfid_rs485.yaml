@@ -1,0 +1,53 @@
+# 默认读头：RS485（UART + DE/RE）
+# 厂商二进制帧 → external_components；ASCII 行输出可直接走下方 uart text_sensor。
+
+uart:
+  - id: rfid_uart
+    tx_pin: ${pin_rs485_tx}
+    rx_pin: ${pin_rs485_rx}
+    baud_rate: 9600
+
+# DE/RE：半双工发送时拉高。只读通道可保持 ALWAYS_OFF。
+switch:
+  - platform: gpio
+    id: rs485_de
+    name: "RS485 DE/RE"
+    pin: ${pin_rs485_de}
+    restore_mode: ALWAYS_OFF
+    internal: true
+
+text_sensor:
+  - platform: uart
+    uart_id: rfid_uart
+    name: "RFID UART line"
+    id: rfid_uart_line
+    internal: true
+    on_value:
+      then:
+        - lambda: |-
+            std::string tag = x;
+            while (!tag.empty() && (tag.back() == '\r' || tag.back() == '\n' || tag.back() == ' '))
+              tag.pop_back();
+            size_t start = 0;
+            while (start < tag.size() && tag[start] == ' ') start++;
+            if (start) tag = tag.substr(start);
+            if (tag.empty()) return;
+            id(rfid_handle_tag)->execute(tag);
+
+# 联调：无读头时验证比对 / 警号 / MQTT event
+button:
+  - platform: template
+    name: "RFID simulate unauthorized tag"
+    id: rfid_sim_deny
+    on_press:
+      - script.execute:
+          id: rfid_handle_tag
+          tag_id: "SIM-DENIED-TAG"
+
+  - platform: template
+    name: "RFID simulate allowlisted tag"
+    id: rfid_sim_allow
+    on_press:
+      - script.execute:
+          id: rfid_handle_tag
+          tag_id: "SIM-ALLOWED-TAG"
