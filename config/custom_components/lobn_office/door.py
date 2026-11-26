@@ -3,20 +3,24 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 import uuid
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any, Literal
 
 import httpx
 
+from .const import SCHEMA_HOME_DOOR_COMMAND
 from .models import DoorCommand
 
 _LOGGER = logging.getLogger(__name__)
 
 DoorResult = Literal["opened", "unknown", "denied"]
+MqttPublish = Callable[..., Awaitable[None]]
 
 
 class DoorAdapter(ABC):
@@ -91,8 +95,98 @@ class HttpRelayAdapter(DoorAdapter):
             return False
 
 
+class MqttDoorAdapter(DoorAdapter):
+    """经 MQTT `home/<node>/door/command` 驱动 ESPHome；成功以发布成功为准。"""
+
+    def __init__(
+        self,
+        *,
+        publish: MqttPublish,
+        gate_node: str = "front_gate",
+        inner_node: str = "classroom_1",
+        state_reader: Callable[[str], Awaitable[str] | str] | None = None,
+        default_target: str = "gate",
+    ) -> None:
+        self._publish = publish
+        self.gate_node = (gate_node or "front_gate").strip() or "front_gate"
+        self.inner_node = (inner_node or "classroom_1").strip() or "classroom_1"
+        self._state_reader = state_reader
+        self.active_target = "gate"
+        self.active_node = self.gate_node
+        self.last_command_id: str = ""
+        self.last_topic: str = ""
+        self.last_payload: str = ""
+        self.offline: bool = False
+        self.calls: list[dict[str, Any]] = []
+        self.select_target(default_target)
+
+    def select_target(self, target: str) -> str:
+        tgt = target if target in ("gate", "inner") else "gate"
+        self.active_target = tgt
+        self.active_node = self.inner_node if tgt == "inner" else self.gate_node
+        return self.active_node
+
+    def command_topic(self, node: str | None = None) -> str:
+        return f"home/{node or self.active_node}/door/command"
+
+    async def open(self, seconds: float, command_id: str) -> bool:
+        ttl = max(1, min(10, int(round(float(seconds) or 3))))
+        payload = {
+            "schema": SCHEMA_HOME_DOOR_COMMAND,
+            "action": "OPEN",
+            "ttl_sec": ttl,
+            "command_id": command_id,
+            "ts": time.time(),
+        }
+        topic = self.command_topic()
+        body = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
+        self.calls.append(
+            {
+                "action": "open",
+                "seconds": ttl,
+                "command_id": command_id,
+                "topic": topic,
+                "target": self.active_target,
+                "node": self.active_node,
+                "ts": time.time(),
+            }
+        )
+        try:
+            await self._publish(topic=topic, payload=body, qos=1, retain=False)
+            self.last_command_id = command_id
+            self.last_topic = topic
+            self.last_payload = body
+            self.offline = False
+            return True
+        except Exception as exc:
+            _LOGGER.warning("MQTT 门禁发布失败 topic=%s: %s", topic, exc)
+            self.offline = True
+            return False
+
+    async def close(self) -> bool:
+        # ESPHome 脉冲结束自动松开，无需关锁指令
+        self.calls.append({"action": "close", "ts": time.time(), "node": self.active_node})
+        return True
+
+    async def state(self) -> str:
+        if self._state_reader is None:
+            return "unknown"
+        try:
+            value = self._state_reader(self.active_node)
+            if asyncio.iscoroutine(value):
+                value = await value
+            text = str(value or "unknown").strip().lower()
+            if text in ("open", "opened", "on"):
+                return "open"
+            if text in ("closed", "close", "off"):
+                return "closed"
+            return text or "unknown"
+        except Exception:
+            return "unknown"
+
+
 class EspDoorAdapter(DoorAdapter):
-    """POST door.command.v1 到 ESP；2xx 且 result=pulsed 才成功。"""
+    """遗留：POST door.command.v1 到自研 HTTP 固件；2xx 且 result=pulsed 才成功。"""
 
     def __init__(
         self,

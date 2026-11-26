@@ -1,9 +1,8 @@
 # ESP32-S3 门禁固件（历史 · HTTP）
 
-> **迁移目标**：生产改用 **ESPHome 教室总控**  
-> → [SmartCenter/esphome/](../../esphome/)（门 + DHT11 + RFID + 板载警号，MQTT `home/<room>/…`）。  
-> 见主仓 [docs/架构-HAOS四App.md](../../../docs/架构-HAOS四App.md)、[docs/资产防盗-RFID.md](../../../docs/资产防盗-RFID.md)。  
-> 本目录保留作旧联调与单测参考，**新店不要再部署 HTTP 门协议**。
+> **遗留**：仅联调 / 单测参考。新店与生产请用  
+> [../esphome/](../esphome/)（`./START.sh` → Device Builder 或 CLI）。  
+> 总览：[../README.md](../README.md) · 架构：[docs/架构-HAOS四App.md](../../../docs/架构-HAOS四App.md)。
 
 旧链路：SmartCenter HTTP → 以太网 W5500 → ESP32-S3 → 继电器。
 
@@ -16,6 +15,8 @@
 cp include/config.example.h include/config.h   # 改引脚与 token
 pio run -t upload
 ```
+
+**不要**用 `firmware/esphome/START.sh` 或 Device Builder 打开本目录。
 
 ## HTTP（废弃中）
 

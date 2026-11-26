@@ -228,12 +228,14 @@ SmartCenter = Home Assistant（uv 依赖）+ custom_components/lobn_office
 升级 HA：改 pyproject.toml / VERSION 中版本后执行「环境修复」
 
 交互菜单：
-  启动   后台 HA / 开发(前台) / 导出运行包 / 杀死进程
+  启动   后台 HA / 开发(前台) / 导出 / 杀死 / 教室总控固件
   运维   状态 / 日志 / 校验密钥权限 / 帮助
   环境   环境检测 / 环境修复 / 自动化测试
+  主菜单亦可直接选「教室总控固件」→ firmware/esphome/START.sh
 
 说明: 管理 Web 即 HA 面板，无独立 Vite；导出仅 center.zip。
-子命令: diagnose | repair | start | dev | export | stop | status | logs | secrets | test | help
+生产固件: firmware/esphome/（Device Builder）；遗留: firmware/esp32s3_door/
+子命令: diagnose | repair | start | dev | export | stop | status | logs | secrets | test | flash | help
 域名建议: smartcenter.lobn → 本机
 EOF
 }
@@ -248,6 +250,20 @@ run_action() {
   pause_back
 }
 
+cmd_esphome_flash() {
+  local entry="$ROOT/firmware/esphome/START.sh"
+  if [[ ! -x "$entry" ]]; then
+    if [[ -f "$entry" ]]; then
+      chmod +x "$entry" || true
+    else
+      echo "[FAIL] 缺少 $entry"
+      return 1
+    fi
+  fi
+  # 转调固件目录 START（Device Builder / CLI）
+  "$entry" "$@"
+}
+
 menu_start() {
   while true; do
     clear_screen
@@ -257,6 +273,7 @@ SmartCenter · 启动
   2) 开发（前台 HA，终端；管理 Web 即 HA）
   3) 导出运行包（center.zip，无独立前端包）
   4) 杀死进程
+  5) 教室总控固件（firmware/esphome）
   0) 返回上级
 EOF
     read -r -p "> " c
@@ -265,6 +282,7 @@ EOF
       2) clear_screen; echo "SmartCenter · 开发"; echo "----------------------------------------"; cmd_dev || true; pause_back ;;
       3) run_action "导出运行包" cmd_export ;;
       4) run_action "杀死进程" cmd_stop ;;
+      5) clear_screen; cmd_esphome_flash || true; pause_back ;;
       0) return 0 ;;
       *) ;;
     esac
@@ -323,6 +341,7 @@ SmartCenter（中央总控）
   1) 启动
   2) 运维
   3) 环境检测
+  4) 教室总控固件（firmware/esphome）
   0) 退出
 EOF
     read -r -p "> " choice
@@ -330,6 +349,7 @@ EOF
       1) menu_start ;;
       2) menu_ops ;;
       3) menu_env ;;
+      4) clear_screen; cmd_esphome_flash || true; pause_back ;;
       0) clear_screen; exit 0 ;;
       *) ;;
     esac
@@ -351,6 +371,7 @@ main() {
     logs) cmd_logs ;;
     secrets) cmd_check_secrets ;;
     test) cmd_test ;;
+    flash|esphome) cmd_esphome_flash ;;
     help|-h|--help) cmd_help ;;
     *) echo "未知: $cmd"; cmd_help; exit 1 ;;
   esac

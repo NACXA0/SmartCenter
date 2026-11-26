@@ -19,8 +19,12 @@ from .const import (
     CONF_ESP_BASE_URL,
     CONF_ESP_TOKEN,
     CONF_FACE_COOLDOWN,
+    CONF_GATE_NODE,
+    CONF_GATE_STATE_ENTITY,
     CONF_GRANT_COOLDOWN,
     CONF_GRANT_PREFETCH_MIN,
+    CONF_INNER_NODE,
+    CONF_INNER_STATE_ENTITY,
     CONF_NIGHT_FACE_MODE,
     CONF_OPEN_SECONDS,
     CONF_OPEN_URL,
@@ -34,7 +38,13 @@ STEP_USER = vol.Schema(
     {
         vol.Required(CONF_STORE_ID, default=1): vol.Coerce(int),
         vol.Optional(CONF_ROOM_ID, default=1): vol.Coerce(int),
-        vol.Required(CONF_DOOR_ADAPTER, default="mock"): vol.In(["mock", "http", "esp"]),
+        vol.Required(CONF_DOOR_ADAPTER, default="mqtt"): vol.In(
+            ["mqtt", "mock", "http", "esp"]
+        ),
+        vol.Optional(CONF_GATE_NODE, default="front_gate"): str,
+        vol.Optional(CONF_INNER_NODE, default="classroom_1"): str,
+        vol.Optional(CONF_GATE_STATE_ENTITY, default=""): str,
+        vol.Optional(CONF_INNER_STATE_ENTITY, default=""): str,
         vol.Optional(CONF_OPEN_URL, default=""): str,
         vol.Optional(CONF_CLOSE_URL, default=""): str,
         vol.Optional(CONF_ESP_BASE_URL, default=""): str,
@@ -48,7 +58,9 @@ STEP_USER = vol.Schema(
         vol.Optional(CONF_CCTV_ENROLL_URL, default=""): str,
         vol.Optional(CONF_CCTV_ENROLL_HMAC, default=""): str,
         vol.Optional(CONF_WECOM_WEBHOOK, default=""): str,
-        vol.Optional(CONF_NIGHT_FACE_MODE, default="stricter"): vol.In(["stricter", "alert_only"]),
+        vol.Optional(CONF_NIGHT_FACE_MODE, default="stricter"): vol.In(
+            ["stricter", "alert_only"]
+        ),
         vol.Optional(CONF_GRANT_PREFETCH_MIN, default=15): vol.Coerce(int),
         vol.Optional(CONF_FACE_COOLDOWN, default=120): vol.Coerce(float),
         vol.Optional(CONF_GRANT_COOLDOWN, default=30): vol.Coerce(float),

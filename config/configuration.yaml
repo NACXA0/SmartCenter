@@ -12,6 +12,7 @@ homeassistant:
   # 外网 URL 如需再配；办公室默认内网
   packages:
     rfid_asset_guard: !include packages/rfid_asset_guard.yaml
+    door_mqtt: !include packages/door_mqtt.yaml
 
 logger:
   default: info

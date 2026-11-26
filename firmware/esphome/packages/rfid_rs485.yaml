@@ -1,31 +1,22 @@
 # 默认读头：RS485（UART + DE/RE）
-# 厂商二进制帧 → external_components；ASCII 行输出可直接走下方 uart text_sensor。
+# ESPHome 已无 text_sensor.uart；ASCII 行用 uart.debug + dummy_receiver 收。
+# 厂商二进制帧仍走 external_components。
 
 uart:
   - id: rfid_uart
     tx_pin: ${pin_rs485_tx}
     rx_pin: ${pin_rs485_rx}
     baud_rate: 9600
-
-# DE/RE：半双工发送时拉高。只读通道可保持 ALWAYS_OFF。
-switch:
-  - platform: gpio
-    id: rs485_de
-    name: "RS485 DE/RE"
-    pin: ${pin_rs485_de}
-    restore_mode: ALWAYS_OFF
-    internal: true
-
-text_sensor:
-  - platform: uart
-    uart_id: rfid_uart
-    name: "RFID UART line"
-    id: rfid_uart_line
-    internal: true
-    on_value:
-      then:
+    debug:
+      direction: RX
+      dummy_receiver: true
+      after:
+        # 读头若只发 CR，可改 delimiter: "\r"
+        delimiter: "\n"
+        timeout: 200ms
+      sequence:
         - lambda: |-
-            std::string tag = x;
+            std::string tag(bytes.begin(), bytes.end());
             while (!tag.empty() && (tag.back() == '\r' || tag.back() == '\n' || tag.back() == ' '))
               tag.pop_back();
             size_t start = 0;
@@ -33,6 +24,15 @@ text_sensor:
             if (start) tag = tag.substr(start);
             if (tag.empty()) return;
             id(rfid_handle_tag)->execute(tag);
+
+# DE/RE：半双工发送时拉高。只读通道可保持 ALWAYS_OFF。
+switch:
+  - platform: gpio
+    id: rs485_de
+    name: "RS485 DE-RE"
+    pin: ${pin_rs485_de}
+    restore_mode: ALWAYS_OFF
+    internal: true
 
 # 联调：无读头时验证比对 / 警号 / MQTT event
 button:

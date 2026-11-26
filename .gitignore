@@ -1,4 +1,7 @@
 .venv/
+firmware/esphome/.venv/
+firmware/esphome/secrets.yaml
+firmware/esphome/.esphome/
 __pycache__/
 *.py[cod]
 .pytest_cache/

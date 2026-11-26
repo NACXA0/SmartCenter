@@ -6,7 +6,8 @@ ESPHome 自带不够时，在这里补**小组件**，仍烧 ESPHome 固件，�
 
 | 场景 | 建议 |
 |------|------|
-| RS485 / RS232 厂商二进制帧（非 ASCII 行、非 Modbus） | `rfid_uart_frame`：解析后只回调标签字符串 → `rfid_handle_tag` |
+| RS485 / RS232 ASCII 行 | 已用 `uart.debug` + `dummy_receiver`（见 `packages/rfid_rs485.yaml`）；**不要**再写已删除的 `text_sensor.uart` |
+| RS485 / RS232 厂商二进制帧（非 ASCII、非 Modbus） | `rfid_uart_frame`：解析后只回调标签字符串 → `rfid_handle_tag` |
 | 韦根 26/34 bit | `wiegand_reader`：GPIO 中断或 RMT，输出卡号；勿在 lambda 位采样 |
 | Modbus 寄存器读 EPC | 优先用 ESPHome 自带 `modbus` / `modbus_controller`，可不写外挂 |
 

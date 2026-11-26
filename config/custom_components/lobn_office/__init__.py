@@ -23,8 +23,12 @@ from .const import (
     CONF_ESP_BASE_URL,
     CONF_ESP_TOKEN,
     CONF_FACE_COOLDOWN,
+    CONF_GATE_NODE,
+    CONF_GATE_STATE_ENTITY,
     CONF_GRANT_COOLDOWN,
     CONF_GRANT_PREFETCH_MIN,
+    CONF_INNER_NODE,
+    CONF_INNER_STATE_ENTITY,
     CONF_NIGHT_FACE_MODE,
     CONF_OPEN_SECONDS,
     CONF_OPEN_URL,
@@ -50,7 +54,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from .cctv_client import CctvClient
     from .cloud_client import CloudClient
     from .coordinator import GrantCoordinator
-    from .door import DoorController, EspDoorAdapter, HttpRelayAdapter, MockDoorAdapter
+    from .door import (
+        DoorController,
+        EspDoorAdapter,
+        HttpRelayAdapter,
+        MockDoorAdapter,
+        MqttDoorAdapter,
+    )
     from .hot_path import InMemoryHotPath
     from .http_api import async_register_views
     from .intent import async_setup_intents
@@ -60,9 +70,43 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from .sense import SenseRuntime
 
     data = entry.data
-    adapter_name = data.get(CONF_DOOR_ADAPTER, "mock")
+    adapter_name = data.get(CONF_DOOR_ADAPTER, "mqtt")
     timeout_sec = float(data.get(CONF_DOOR_TIMEOUT, 3))
-    if adapter_name == "esp" and data.get(CONF_ESP_BASE_URL):
+    gate_node = str(data.get(CONF_GATE_NODE) or "front_gate")
+    inner_node = str(data.get(CONF_INNER_NODE) or "classroom_1")
+    if adapter_name == "mqtt":
+        gate_entity = str(data.get(CONF_GATE_STATE_ENTITY) or "")
+        inner_entity = str(data.get(CONF_INNER_STATE_ENTITY) or "")
+
+        async def _mqtt_publish(
+            *, topic: str, payload: str, qos: int = 1, retain: bool = False
+        ) -> None:
+            await hass.services.async_call(
+                "mqtt",
+                "publish",
+                {
+                    "topic": topic,
+                    "payload": payload,
+                    "qos": qos,
+                    "retain": retain,
+                },
+                blocking=True,
+            )
+
+        def _read_state(node: str) -> str:
+            entity_id = gate_entity if node == gate_node else inner_entity
+            if not entity_id:
+                return "unknown"
+            state = hass.states.get(entity_id)
+            return state.state if state else "unknown"
+
+        adapter = MqttDoorAdapter(
+            publish=_mqtt_publish,
+            gate_node=gate_node,
+            inner_node=inner_node,
+            state_reader=_read_state,
+        )
+    elif adapter_name == "esp" and data.get(CONF_ESP_BASE_URL):
         adapter = EspDoorAdapter(
             base_url=data[CONF_ESP_BASE_URL],
             token=data.get(CONF_ESP_TOKEN, ""),
@@ -150,6 +194,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "cctv_event_hmac": data.get(CONF_CCTV_EVENT_HMAC, ""),
         "esp_token": data.get(CONF_ESP_TOKEN, ""),
         "door_adapter_name": adapter_name,
+        "gate_node": gate_node,
+        "inner_node": inner_node,
         "version": _component_version(),
     }
 
@@ -226,6 +272,11 @@ async def _door_request_loop(hass: HomeAssistant) -> None:
                     request_id = item.get("request_id")
                     if not grant_id or request_id is None:
                         continue
+                    target = str(item.get("target") or "gate")
+                    door = runtime.get("door")
+                    adapter = getattr(door, "adapter", None) if door else None
+                    if adapter is not None and hasattr(adapter, "select_target"):
+                        adapter.select_target(target)
                     # 确保热名单有该授权（可能刚支付尚未到预取周期）
                     if hot.grants.get(grant_id) is None:
                         grants = await cloud.pull_pending_grants(15)

@@ -1,0 +1,57 @@
+# 店员保命开门 — 只发 MQTT，不经云端队列 / sidecar
+# 主题：home/<node>/door/command|state（与 ESPHome classroom_node 一致）
+# 默认 node：front_gate / classroom_1；多店时改下方主题。
+
+input_button:
+  door_open_gate:
+    name: "大门开门"
+    icon: mdi:door-open
+  door_open_inner:
+    name: "里门开门"
+    icon: mdi:door
+
+mqtt:
+  binary_sensor:
+    - name: "大门门磁"
+      unique_id: door_front_gate_contact
+      state_topic: "home/front_gate/door/state"
+      payload_on: "open"
+      payload_off: "closed"
+      device_class: door
+    - name: "里门门磁"
+      unique_id: door_classroom_1_contact
+      state_topic: "home/classroom_1/door/state"
+      payload_on: "open"
+      payload_off: "closed"
+      device_class: door
+
+automation:
+  - id: door_mqtt_staff_open_gate
+    alias: "店员保命 · 大门 MQTT 开门"
+    mode: single
+    trigger:
+      - platform: state
+        entity_id: input_button.door_open_gate
+    action:
+      - service: mqtt.publish
+        data:
+          topic: home/front_gate/door/command
+          qos: 1
+          retain: false
+          payload: >
+            {"schema":"home.door.command.v1","action":"OPEN","ttl_sec":5,"command_id":"staff-gate-{{ now().timestamp() | int }}","ts":{{ now().timestamp() }}}
+
+  - id: door_mqtt_staff_open_inner
+    alias: "店员保命 · 里门 MQTT 开门"
+    mode: single
+    trigger:
+      - platform: state
+        entity_id: input_button.door_open_inner
+    action:
+      - service: mqtt.publish
+        data:
+          topic: home/classroom_1/door/command
+          qos: 1
+          retain: false
+          payload: >
+            {"schema":"home.door.command.v1","action":"OPEN","ttl_sec":5,"command_id":"staff-inner-{{ now().timestamp() | int }}","ts":{{ now().timestamp() }}}
