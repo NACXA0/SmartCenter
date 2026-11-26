@@ -40,7 +40,8 @@ esphome/
 └── external_components/
 ```
 
-HA：`config/packages/door_mqtt.yaml`、`rfid_asset_guard.yaml`。  
+HA：`config/packages/door_mqtt.yaml`、`face_grant_mqtt.yaml`、`rfid_asset_guard.yaml`。  
 `lobn_office` 适配器默认 `mqtt`，`gate|inner` → node。
 
+店内部署全文：[docs/部署体系.md](../../../docs/部署体系.md) §6。  
 边界：[docs/资产防盗-RFID.md](../../../docs/资产防盗-RFID.md)。

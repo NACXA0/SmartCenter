@@ -1,0 +1,4 @@
+# 放到 HAOS 可访问路径后，在「附加组件商店 → 仓库」添加该目录 URL/路径
+name: LOBN SmartCenter local
+url: https://github.com/NACXA0/SmartCenter
+maintainer: LOBN

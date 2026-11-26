@@ -1,0 +1,13 @@
+data/
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+*.sqlite3
+enroll_frames/
+backups/
+.env.lan
+.env
+*.local
+web/node_modules/
+web/dist/

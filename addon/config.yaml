@@ -1,0 +1,82 @@
+name: SmartCenter
+version: "0.2.0"
+slug: smartcenter
+description: 交互式人脸采集、本地底库与刷脸开门决策（发 business/access/grant）
+url: https://github.com/NACXA0/SmartCenter
+arch:
+  - amd64
+  - aarch64
+startup: services
+boot: auto
+init: false
+ingress: true
+ingress_port: 8080
+panel_icon: mdi:face-recognition
+panel_title: SmartCenter
+hassio_api: true
+hassio_role: default
+auth_api: true
+services:
+  - mqtt:need
+map:
+  - media:ro
+  - share:rw
+ports:
+  8080/tcp: 8080
+ports_description:
+  8080/tcp: SmartCenter API / 采集页（一般用 Ingress，可不暴露）
+options:
+  school_id: 1
+  door_cameras:
+    - front_desk
+  door_zones:
+    - front_desk_zone
+  door_node: front_gate
+  match_threshold: 0.42
+  verify_threshold: 0.48
+  cooldown_sec: 30
+  required_enroll_frames: 5
+  required_match_frames: 3
+  model_version: mock-v1
+  embedder: mock
+  # 改成 Supervisor 里 Frigate 实际主机名（或 IP）；安装后在插件信息页查看
+  frigate_url: http://ccab4aaf-frigate-fa:5000
+  go2rtc_url: http://ccab4aaf-frigate-fa:1984
+  cloud_base_url: ""
+  cloud_hmac_secret: ""
+  backup_interval_hours: 6
+  audit_max_rows: 5000
+  audit_max_age_days: 30
+  grants_seen_max_age_hours: 48
+  session_ttl_sec: 1800
+  maintenance_interval_sec: 900
+  log_max_mb: 5
+  log_backup_count: 5
+  match_concurrency: 1
+schema:
+  school_id: int
+  door_cameras:
+    - str
+  door_zones:
+    - str
+  door_node: str
+  match_threshold: float
+  verify_threshold: float
+  cooldown_sec: int
+  required_enroll_frames: int
+  required_match_frames: int
+  model_version: str
+  embedder: list(mock|onnx)
+  frigate_url: str
+  go2rtc_url: str
+  cloud_base_url: str
+  cloud_hmac_secret: password
+  backup_interval_hours: int
+  audit_max_rows: int
+  audit_max_age_days: int
+  grants_seen_max_age_hours: int
+  session_ttl_sec: int
+  maintenance_interval_sec: int
+  log_max_mb: int
+  log_backup_count: int
+  match_concurrency: int

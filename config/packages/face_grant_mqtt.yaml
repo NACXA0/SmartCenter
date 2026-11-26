@@ -1,0 +1,41 @@
+# SmartCenter Add-on → business/access/grant → 脉冲开门
+# 过期或重复 command_id 不脉冲。店员手动开门仍走 door_mqtt.yaml。
+
+input_text:
+  face_grant_last_command_id:
+    name: "刷脸最近 command_id"
+    max: 64
+    initial: ""
+
+automation:
+  - id: face_grant_to_door_command
+    alias: "刷脸 grant → 门脉冲"
+    mode: queued
+    max: 5
+    trigger:
+      - platform: mqtt
+        topic: business/access/grant
+    condition:
+      - condition: template
+        value_template: >
+          {% set p = trigger.payload_json %}
+          {% set cid = p.command_id | default('') %}
+          {% set exp = p.expires_at | default('') %}
+          {{
+            cid != ''
+            and cid != states('input_text.face_grant_last_command_id')
+            and (exp == '' or as_timestamp(exp, default=0) > now().timestamp())
+          }}
+    action:
+      - service: input_text.set_value
+        target:
+          entity_id: input_text.face_grant_last_command_id
+        data:
+          value: "{{ trigger.payload_json.command_id }}"
+      - service: mqtt.publish
+        data:
+          topic: "home/{{ trigger.payload_json.node | default(trigger.payload_json.door) | default('front_gate') }}/door/command"
+          qos: 1
+          retain: false
+          payload: >
+            {"schema":"home.door.command.v1","action":"OPEN","ttl_sec":{{ trigger.payload_json.ttl_sec | default(3) }},"command_id":"{{ trigger.payload_json.command_id }}","reason":"face_match","ts":{{ now().timestamp() }}}

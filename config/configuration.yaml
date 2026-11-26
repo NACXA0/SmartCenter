@@ -13,6 +13,7 @@ homeassistant:
   packages:
     rfid_asset_guard: !include packages/rfid_asset_guard.yaml
     door_mqtt: !include packages/door_mqtt.yaml
+    face_grant_mqtt: !include packages/face_grant_mqtt.yaml
 
 logger:
   default: info

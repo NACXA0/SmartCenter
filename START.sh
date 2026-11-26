@@ -1,12 +1,23 @@
 #!/usr/bin/env bash
 # SmartCenter 交互菜单：启动 / 运维 / 环境检测（选中后清屏覆盖刷新）
-# HA 经 uv 依赖安装；业务在 custom_components/lobn_office，不改主干。
+#
+# 两套东西，不要混：
+#   1) Home Assistant 开发态 —— uv sync 拉 homeassistant；测 lobn_office / packages
+#   2) SmartCenter Add-on —— addon/ 里独立 FastAPI；本地 uvicorn --reload，不必装进 HAOS
+#
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 CONFIG_DIR="$ROOT/config"
 PID_FILE="$ROOT/data/hass.pid"
 LOG_FILE="$ROOT/data/hass.log"
+ADDON_DIR="$ROOT/addon"
+ADDON_PID_FILE="$ROOT/data/addon.pid"
+ADDON_LOG_FILE="$ROOT/data/addon.log"
+ADDON_PORT="${SMARTCENTER_ADDON_PORT:-8080}"
+ADDON_UI_PORT="${SMARTCENTER_ADDON_UI_PORT:-5173}"
+ADDON_UI_PID_FILE="$ROOT/data/addon-ui.pid"
+ADDON_WEB_DIR="$ADDON_DIR/web"
 EXPORT_DIR="$ROOT/export"
 YES=0
 CI=0
@@ -77,8 +88,10 @@ cmd_diagnose() {
 cmd_repair() {
   need_uv
   ensure_dirs
-  echo "将执行: uv python install 3.14 && uv sync"
-  if [[ "$YES" -eq 1 ]] || { read -r -p "继续? [y/N] " a && [[ "$a" =~ ^[Yy]$ ]]; }; then
+  echo "【本机 HA 开发环境】uv sync → homeassistant"
+  echo "  用于改 packages / lobn_office；比连内网 HAOS 更方便、不碰生产。"
+  echo "  人脸 Add-on 另用 ./START.sh addon（不依赖本项）。"
+  if [[ "$YES" -eq 1 ]] || { read -r -p "安装本机 HA 依赖? [y/N] " a && [[ "$a" =~ ^[Yy]$ ]]; }; then
     uv python install 3.14
     uv sync
   fi
@@ -87,7 +100,337 @@ cmd_repair() {
     chmod 600 "$CONFIG_DIR/secrets.yaml"
     echo "已生成 config/secrets.yaml（请填写后保持 0600）"
   fi
-  echo "修复完成。HA 钉选：$(cat "$ROOT/VERSION" 2>/dev/null || echo '?')"
+  echo "完成。HA 钉选：$(cat "$ROOT/VERSION" 2>/dev/null || echo '?')"
+}
+
+# ---------- Add-on（独立 FastAPI，本地热重载）----------
+addon_venv_python() {
+  if [[ -x "$ADDON_DIR/.venv/bin/python" ]]; then
+    echo "$ADDON_DIR/.venv/bin/python"
+  else
+    echo ""
+  fi
+}
+
+is_addon_running() {
+  [[ -f "$ADDON_PID_FILE" ]] && kill -0 "$(cat "$ADDON_PID_FILE")" 2>/dev/null
+}
+
+is_addon_ui_running() {
+  [[ -f "$ADDON_UI_PID_FILE" ]] && kill -0 "$(cat "$ADDON_UI_PID_FILE")" 2>/dev/null
+}
+
+ensure_addon_py() {
+  local py
+  py="$(addon_venv_python)"
+  if [[ -z "$py" ]] || ! "$py" -c "import uvicorn" 2>/dev/null; then
+    cmd_addon_repair
+    py="$(addon_venv_python)"
+  fi
+  echo "$py"
+}
+
+addon_export_env() {
+  export SMARTCENTER_DATA="${SMARTCENTER_DATA:-$ADDON_DIR/data}"
+  export SMARTCENTER_DEV_AUTH="${SMARTCENTER_DEV_AUTH:-1}"
+  export SMARTCENTER_EMBEDDER="${SMARTCENTER_EMBEDDER:-mock}"
+  # 本机无 HAOS Mosquitto；要联真实总线再 export MQTT_HOST=…
+  export MQTT_HOST="${MQTT_HOST:-off}"
+  mkdir -p "$SMARTCENTER_DATA"
+}
+
+cmd_addon_repair() {
+  need_uv
+  ensure_dirs
+  [[ -d "$ADDON_DIR" ]] || { echo "[FAIL] 缺少 $ADDON_DIR"; return 1; }
+  echo "【Add-on】安装依赖（FastAPI 等，不含 homeassistant）"
+  local index="${UV_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}"
+  (
+    cd "$ADDON_DIR"
+    [[ -d .venv ]] || uv venv .venv
+    UV_INDEX_URL="$index" uv pip install -r requirements-dev.txt --python .venv/bin/python
+  )
+  echo "就绪。开发: ./START.sh addon · 单测: ./START.sh addon-test"
+}
+
+cmd_addon_test() {
+  ensure_dirs
+  local py
+  py="$(ensure_addon_py)"
+  echo "=== Add-on 单测 ==="
+  (cd "$ADDON_DIR" && "$py" -m pytest -q)
+}
+
+open_browser() {
+  local url="$1"
+  [[ "$CI" -eq 1 ]] && return 0
+  if have xdg-open; then
+    xdg-open "$url" >/dev/null 2>&1 || true
+  elif have sensible-browser; then
+    sensible-browser "$url" >/dev/null 2>&1 || true
+  fi
+}
+
+# 仅后端（前台）
+cmd_addon_api() {
+  ensure_dirs
+  [[ -d "$ADDON_DIR" ]] || { echo "[FAIL] 缺少 $ADDON_DIR"; return 1; }
+  local py
+  py="$(ensure_addon_py)"
+  addon_export_env
+  echo "Add-on 后端 API → http://127.0.0.1:${ADDON_PORT}/  （/docs · /healthz）"
+  echo "  改 app/ 热重载；Ctrl+C 结束 · 采集页请另开「仅前端」或用「全栈」"
+  (
+    cd "$ADDON_DIR"
+    exec "$py" -m uvicorn app.main:app --host 127.0.0.1 --port "$ADDON_PORT" --reload --app-dir .
+  )
+}
+
+ensure_addon_web_node() {
+  [[ -d "$ADDON_WEB_DIR" ]] || { echo "[FAIL] 缺少 $ADDON_WEB_DIR"; return 1; }
+  if [[ ! -d "$ADDON_WEB_DIR/node_modules" ]]; then
+    echo "安装前端依赖（npm install）…"
+    (cd "$ADDON_WEB_DIR" && npm install)
+  fi
+}
+
+cmd_addon_ui_build() {
+  ensure_addon_web_node || return 1
+  echo "构建工作台 → $ADDON_DIR/app/webui"
+  (cd "$ADDON_WEB_DIR" && npm run build)
+  echo "完成。生产/全栈用 http://127.0.0.1:${ADDON_PORT}/"
+}
+
+# 仅前端：Vite 热更（代理 /api → 本机 Add-on）；需后端已起或稍后起
+cmd_addon_ui() {
+  ensure_dirs
+  ensure_addon_web_node || return 1
+  local url="http://127.0.0.1:${ADDON_UI_PORT}/"
+  echo "Add-on 前端 Vite → $url"
+  echo "  改 web/src 热更新；API 代理 → http://127.0.0.1:${ADDON_PORT}（请先起后端）"
+  if is_addon_ui_running; then
+    echo "前端已在跑 pid=$(cat "$ADDON_UI_PID_FILE")"
+    open_browser "$url"
+    return 0
+  fi
+  open_browser "$url"
+  (
+    cd "$ADDON_WEB_DIR"
+    exec npx vite --host 127.0.0.1 --port "$ADDON_UI_PORT"
+  )
+}
+
+# 全栈：后端后台 + 浏览器打开同域采集页（生产同构：API 兼静态）
+cmd_addon_full() {
+  ensure_dirs
+  [[ -d "$ADDON_DIR" ]] || { echo "[FAIL] 缺少 $ADDON_DIR"; return 1; }
+  local py
+  py="$(ensure_addon_py)"
+  addon_export_env
+  if ! is_addon_running; then
+    echo "后台启动后端…"
+    (
+      cd "$ADDON_DIR"
+      nohup "$py" -m uvicorn app.main:app --host 127.0.0.1 --port "$ADDON_PORT" --reload --app-dir . \
+        >>"$ADDON_LOG_FILE" 2>&1 &
+      echo $! >"$ADDON_PID_FILE"
+    )
+    sleep 1
+  fi
+  local url="http://127.0.0.1:${ADDON_PORT}/"
+  echo "全栈就绪（API + 采集页同端口）→ $url"
+  echo "  日志 $ADDON_LOG_FILE · 停: ./START.sh addon-stop"
+  open_browser "$url"
+  if [[ "$CI" -eq 1 || "$YES" -eq 1 ]]; then
+    return 0
+  fi
+  echo "按 Ctrl+C 停止跟踪日志（服务仍后台）；要停服务用菜单运维或 addon-stop"
+  trap 'trap - INT; echo' INT
+  tail -f "$ADDON_LOG_FILE" || true
+  trap - INT
+}
+
+# 兼容旧名：addon / addon-dev = 全栈前台（uvicorn 兼页面，Ctrl+C 停）
+cmd_addon_dev() {
+  ensure_dirs
+  [[ -d "$ADDON_DIR" ]] || { echo "[FAIL] 缺少 $ADDON_DIR"; return 1; }
+  # 无构建产物时自动编一次工作台
+  if [[ ! -d "$ADDON_DIR/app/webui/assets" && -d "$ADDON_WEB_DIR" ]]; then
+    cmd_addon_ui_build || echo "[WARN] 前端构建失败，将回落旧静态页（若有）"
+  fi
+  local py
+  py="$(ensure_addon_py)"
+  if is_addon_running; then
+    echo "后端已在后台跑；打开采集页。停后台: ./START.sh addon-stop"
+    open_browser "http://127.0.0.1:${ADDON_PORT}/"
+    return 0
+  fi
+  addon_export_env
+  echo "全栈前台（API+页）→ http://127.0.0.1:${ADDON_PORT}/  Ctrl+C 结束"
+  open_browser "http://127.0.0.1:${ADDON_PORT}/"
+  (
+    cd "$ADDON_DIR"
+    exec "$py" -m uvicorn app.main:app --host 127.0.0.1 --port "$ADDON_PORT" --reload --app-dir .
+  )
+}
+
+cmd_addon_start() {
+  ensure_dirs
+  local py
+  py="$(ensure_addon_py)"
+  if is_addon_running; then
+    echo "后端已在运行 pid=$(cat "$ADDON_PID_FILE")"
+    return 0
+  fi
+  addon_export_env
+  echo "后台启动 Add-on 后端 → http://127.0.0.1:${ADDON_PORT}/"
+  (
+    cd "$ADDON_DIR"
+    nohup "$py" -m uvicorn app.main:app --host 127.0.0.1 --port "$ADDON_PORT" --reload --app-dir . \
+      >>"$ADDON_LOG_FILE" 2>&1 &
+    echo $! >"$ADDON_PID_FILE"
+  )
+  sleep 1
+  echo "pid=$(cat "$ADDON_PID_FILE")  停: ./START.sh addon-stop"
+}
+
+_stop_pid_tree() {
+  local pid="${1:-}"
+  [[ -z "$pid" ]] && return 0
+  local c
+  for c in $(pgrep -P "$pid" 2>/dev/null || true); do
+    _stop_pid_tree "$c"
+  done
+  kill "$pid" 2>/dev/null || true
+}
+
+# 一键：前台会话；关终端 / Ctrl+C = 全部停掉（与终端同生命周期）
+# 热更新：uvicorn --reload（API）+ Vite HMR（工作台）+ 本机 HA
+cmd_dev_all() {
+  ensure_dirs
+  need_uv
+  echo "=== 一键开发：Add-on(API热更+Vite HMR) + 本机 HA（跟本终端同生共死）==="
+  if [[ ! -d "$ROOT/.venv" ]]; then
+    echo "首次需安装本机 HA 依赖…"
+    YES=1 cmd_repair
+  fi
+  ensure_addon_web_node || return 1
+  local py
+  py="$(ensure_addon_py)"
+  addon_export_env
+
+  # 清掉先前 nohup/残留，避免端口占用
+  if is_addon_running || is_running || is_addon_ui_running; then
+    echo "停止已有实例…"
+    cmd_stop_all >/dev/null 2>&1 || true
+  fi
+
+  local addon_pid="" ui_pid="" ha_pid="" cleaned=0
+  local ui_log="$ROOT/data/addon-ui.log"
+  _dev_all_cleanup() {
+    [[ "$cleaned" -eq 1 ]] && return 0
+    cleaned=1
+    trap - EXIT INT TERM HUP
+    echo
+    echo "终端结束 → 停止一键开发…"
+    _stop_pid_tree "${ui_pid:-}"
+    _stop_pid_tree "${addon_pid:-}"
+    _stop_pid_tree "${ha_pid:-}"
+    sleep 0.8
+    _stop_pid_tree "${ui_pid:-}"
+    _stop_pid_tree "${addon_pid:-}"
+    _stop_pid_tree "${ha_pid:-}"
+    kill -9 "${ui_pid:-}" "${addon_pid:-}" "${ha_pid:-}" 2>/dev/null || true
+    rm -f "$ADDON_PID_FILE" "$ADDON_UI_PID_FILE" "$PID_FILE"
+    echo "已全部停止"
+  }
+  trap _dev_all_cleanup EXIT INT TERM HUP
+
+  mkdir -p "$(dirname "$ADDON_LOG_FILE")" "$(dirname "$LOG_FILE")"
+  : >"$ADDON_LOG_FILE"
+  : >"$ui_log"
+  : >"$LOG_FILE"
+
+  (
+    cd "$ADDON_DIR"
+    exec "$py" -m uvicorn app.main:app --host 127.0.0.1 --port "$ADDON_PORT" --reload --app-dir .
+  ) >>"$ADDON_LOG_FILE" 2>&1 &
+  addon_pid=$!
+  echo "$addon_pid" >"$ADDON_PID_FILE"
+
+  (
+    cd "$ADDON_WEB_DIR"
+    # 代理目标跟 ADDON_PORT 对齐（vite.config 默认 8080）
+    export SMARTCENTER_ADDON_PORT="$ADDON_PORT"
+    exec npx vite --host 127.0.0.1 --port "$ADDON_UI_PORT"
+  ) >>"$ui_log" 2>&1 &
+  ui_pid=$!
+  echo "$ui_pid" >"$ADDON_UI_PID_FILE"
+
+  (
+    exec uv run hass -c "$CONFIG_DIR"
+  ) >>"$LOG_FILE" 2>&1 &
+  ha_pid=$!
+  echo "$ha_pid" >"$PID_FILE"
+
+  sleep 2
+  # 开发主入口 = Vite（HMR）；API 同端口也可看构建产物
+  open_browser "http://127.0.0.1:${ADDON_UI_PORT}/"
+  open_browser "http://127.0.0.1:8123/"
+  echo
+  echo "就绪（勿关本终端；Ctrl+C 或关终端 = 全停）："
+  echo "  工作台 HMR  http://127.0.0.1:${ADDON_UI_PORT}/   ← 改 web/src 即热更"
+  echo "  API reload  http://127.0.0.1:${ADDON_PORT}/       ← 改 app/*.py 即热更"
+  echo "  HA          http://127.0.0.1:8123/"
+  echo "  日志        $ADDON_LOG_FILE · $ui_log · $LOG_FILE"
+  echo "----------------------------------------"
+  wait
+}
+
+cmd_stop_all() {
+  echo "停止 Add-on…"
+  cmd_addon_stop || true
+  echo "停止本机 HA…"
+  cmd_stop || true
+  echo "一键开发已全部停止"
+}
+
+cmd_addon_ui_start() {
+  ensure_dirs
+  ensure_addon_web_node || return 1
+  if is_addon_ui_running; then
+    echo "前端已在运行 pid=$(cat "$ADDON_UI_PID_FILE")"
+    return 0
+  fi
+  (
+    cd "$ADDON_WEB_DIR"
+    nohup npx vite --host 127.0.0.1 --port "$ADDON_UI_PORT" >>"$ROOT/data/addon-ui.log" 2>&1 &
+    echo $! >"$ADDON_UI_PID_FILE"
+  )
+  sleep 0.5
+  echo "前端 Vite http://127.0.0.1:${ADDON_UI_PORT}/ （代理 API → :${ADDON_PORT}）"
+  open_browser "http://127.0.0.1:${ADDON_UI_PORT}/"
+}
+
+cmd_addon_stop() {
+  local n=0
+  if is_addon_running; then
+    kill "$(cat "$ADDON_PID_FILE")" 2>/dev/null || true
+    rm -f "$ADDON_PID_FILE"
+    echo "后端已停"
+    n=1
+  else
+    rm -f "$ADDON_PID_FILE"
+  fi
+  if is_addon_ui_running; then
+    kill "$(cat "$ADDON_UI_PID_FILE")" 2>/dev/null || true
+    rm -f "$ADDON_UI_PID_FILE"
+    echo "前端已停"
+    n=1
+  else
+    rm -f "$ADDON_UI_PID_FILE"
+  fi
+  [[ "$n" -eq 1 ]] || echo "Add-on 未在跑"
 }
 
 cmd_test() {
@@ -190,21 +533,40 @@ cmd_stop() {
 # ---------- 运维 ----------
 cmd_status() {
   echo "=== 状态 ==="
-  if is_running; then
-    echo "HA: running  pid=$(cat "$PID_FILE")"
+  if is_addon_running; then
+    echo "Add-on 后端: running  pid=$(cat "$ADDON_PID_FILE")  :${ADDON_PORT}"
   else
-    echo "HA: stopped"
+    echo "Add-on 后端: stopped"
   fi
-  echo "配置目录: $CONFIG_DIR"
-  echo "集成: lobn_office → $CONFIG_DIR/custom_components/lobn_office"
-  echo "--- 最近日志 ---"
-  if [[ -f "$LOG_FILE" ]]; then tail -n 25 "$LOG_FILE"; else echo "(尚日志)"; fi
+  if is_addon_ui_running; then
+    echo "Add-on 前端: running  pid=$(cat "$ADDON_UI_PID_FILE")  :${ADDON_UI_PORT}"
+  else
+    echo "Add-on 前端: stopped（全栈时页面由后端同端口提供）"
+  fi
+  if is_running; then
+    echo "本机 HA（可选）: running  pid=$(cat "$PID_FILE")  :8123"
+  else
+    echo "本机 HA（可选）: stopped  · 生产 HA 在 HAOS，不必起本机"
+  fi
+  echo "配置: $CONFIG_DIR"
+  echo "--- Add-on 日志尾 ---"
+  if [[ -f "$ADDON_LOG_FILE" ]]; then tail -n 15 "$ADDON_LOG_FILE"; else echo "(无)"; fi
 }
 
 cmd_logs() {
+  mkdir -p "$(dirname "$ADDON_LOG_FILE")"
+  touch "$ADDON_LOG_FILE"
+  echo "跟踪 Add-on 日志（Ctrl+C 返回）: $ADDON_LOG_FILE"
+  echo "（本机 HA 日志: $LOG_FILE）"
+  trap 'trap - INT; echo; echo "已停止跟踪"' INT
+  tail -f "$ADDON_LOG_FILE" || true
+  trap - INT
+}
+
+cmd_logs_ha() {
   mkdir -p "$(dirname "$LOG_FILE")"
   touch "$LOG_FILE"
-  echo "跟踪日志（Ctrl+C 返回）: $LOG_FILE"
+  echo "跟踪本机 HA 日志（Ctrl+C 返回）: $LOG_FILE"
   trap 'trap - INT; echo; echo "已停止跟踪"' INT
   tail -f "$LOG_FILE" || true
   trap - INT
@@ -224,19 +586,18 @@ cmd_help() {
   cat <<EOF
 用法: ./START.sh [子命令] [--yes|--ci]
 
-SmartCenter = Home Assistant（uv 依赖）+ custom_components/lobn_office
-升级 HA：改 pyproject.toml / VERSION 中版本后执行「环境修复」
+开发优先本机：Add-on（uvicorn）+ 本机 HA（packages/lobn_office）。
+生产才用店内 HAOS；日常不连内网 HAOS（免误伤、免端口/ACL）。
 
-交互菜单：
-  启动   后台 HA / 开发(前台) / 导出 / 杀死 / 教室总控固件
-  运维   状态 / 日志 / 校验密钥权限 / 帮助
-  环境   环境检测 / 环境修复 / 自动化测试
-  主菜单亦可直接选「教室总控固件」→ firmware/esphome/START.sh
+菜单
+  启动   Add-on 起停、固件、导出
+  开发   Add-on 全栈/前后端；本机 HA :8123
+  运维   状态、日志
+  环境   Add-on 依赖 · 本机 HA 依赖（uv sync）
 
-说明: 管理 Web 即 HA 面板，无独立 Vite；导出仅 center.zip。
-生产固件: firmware/esphome/（Device Builder）；遗留: firmware/esp32s3_door/
-子命令: diagnose | repair | start | dev | export | stop | status | logs | secrets | test | flash | help
-域名建议: smartcenter.lobn → 本机
+一键：all | dev-all（前台，关终端=全停）· 残留清理：stop-all
+Add-on：addon | addon-api | addon-ui | addon-ui-build | addon-start/stop | addon-test
+本机 HA：dev | start | stop | repair | test | logs-ha
 EOF
 }
 
@@ -269,20 +630,50 @@ menu_start() {
     clear_screen
     cat <<EOF
 SmartCenter · 启动
-  1) 后台启动 Home Assistant
-  2) 开发（前台 HA，终端；管理 Web 即 HA）
-  3) 导出运行包（center.zip，无独立前端包）
-  4) 杀死进程
-  5) 教室总控固件（firmware/esphome）
-  0) 返回上级
+  1) Add-on 后台启动（后端 :${ADDON_PORT}）
+  2) Add-on 停止（后端+独立前端）
+  3) 教室总控固件（ESPHome）
+  4) 导出 center.zip
+  0) 返回
 EOF
     read -r -p "> " c
     case "$c" in
-      1) run_action "启动 HA" cmd_start ;;
-      2) clear_screen; echo "SmartCenter · 开发"; echo "----------------------------------------"; cmd_dev || true; pause_back ;;
-      3) run_action "导出运行包" cmd_export ;;
-      4) run_action "杀死进程" cmd_stop ;;
-      5) clear_screen; cmd_esphome_flash || true; pause_back ;;
+      1) run_action "Add-on 后台" cmd_addon_start ;;
+      2) run_action "Add-on 停止" cmd_addon_stop ;;
+      3) clear_screen; cmd_esphome_flash || true; pause_back ;;
+      4) run_action "导出" cmd_export ;;
+      0) return 0 ;;
+      *) ;;
+    esac
+  done
+}
+
+menu_dev() {
+  while true; do
+    clear_screen
+    cat <<EOF
+SmartCenter · 开发（本机；不连店内 HAOS）
+  1) 一键开发 — Add-on+本机HA（前台；关终端即全停）
+  2) 强制停残留（一般不必；关终端会自动停）
+  —— 分开起 ——
+  3) 仅 Add-on 全栈 :${ADDON_PORT}（前台热重载）
+  4) 仅后端 / 5) 仅前端 :${ADDON_UI_PORT} / 6) Add-on 单测
+  7) 仅本机 HA 前台 :8123
+  8) 仅本机 HA 后台
+  9) 仅停本机 HA
+  0) 返回
+EOF
+    read -r -p "> " c
+    case "$c" in
+      1) clear_screen; echo "SmartCenter · 一键开发"; echo "----------------------------------------"; cmd_dev_all || true; pause_back ;;
+      2) run_action "强制停残留" cmd_stop_all ;;
+      3) clear_screen; echo "SmartCenter · Add-on 全栈"; echo "----------------------------------------"; cmd_addon_dev || true; pause_back ;;
+      4) clear_screen; echo "SmartCenter · 仅后端"; echo "----------------------------------------"; cmd_addon_api || true; pause_back ;;
+      5) clear_screen; echo "SmartCenter · 仅前端"; echo "----------------------------------------"; cmd_addon_ui || true; pause_back ;;
+      6) run_action "Add-on 单测" cmd_addon_test ;;
+      7) clear_screen; echo "SmartCenter · 本机 HA"; echo "----------------------------------------"; cmd_dev || true; pause_back ;;
+      8) run_action "本机 HA 后台" cmd_start ;;
+      9) run_action "停本机 HA" cmd_stop ;;
       0) return 0 ;;
       *) ;;
     esac
@@ -295,17 +686,19 @@ menu_ops() {
     cat <<EOF
 SmartCenter · 运维
   1) 状态
-  2) 日志（跟踪）
-  3) 校验密钥权限
-  4) 帮助
-  0) 返回上级
+  2) Add-on 日志
+  3) 本机 HA 日志（开发用）
+  4) 校验 secrets 权限
+  5) 帮助
+  0) 返回
 EOF
     read -r -p "> " c
     case "$c" in
       1) run_action "状态" cmd_status ;;
-      2) clear_screen; echo "SmartCenter · 日志"; echo "----------------------------------------"; cmd_logs; pause_back ;;
-      3) run_action "校验密钥" cmd_check_secrets ;;
-      4) run_action "帮助" cmd_help ;;
+      2) clear_screen; echo "SmartCenter · Add-on 日志"; echo "----------------------------------------"; cmd_logs; pause_back ;;
+      3) clear_screen; echo "SmartCenter · HA 日志"; echo "----------------------------------------"; cmd_logs_ha; pause_back ;;
+      4) run_action "校验密钥" cmd_check_secrets ;;
+      5) run_action "帮助" cmd_help ;;
       0) return 0 ;;
       *) ;;
     esac
@@ -316,17 +709,19 @@ menu_env() {
   while true; do
     clear_screen
     cat <<EOF
-SmartCenter · 环境检测
-  1) 环境检测
-  2) 环境修复 / 安装
-  3) 自动化测试
-  0) 返回上级
+SmartCenter · 环境
+  1) Add-on 依赖（人脸开发）
+  2) 本机 HA 依赖（uv sync → homeassistant；开发 packages 用）
+  3) 环境检测
+  4) lobn_office 单测（不启 HA 进程）
+  0) 返回
 EOF
     read -r -p "> " c
     case "$c" in
-      1) run_action "环境检测" cmd_diagnose ;;
-      2) run_action "环境修复" cmd_repair ;;
-      3) run_action "自动化测试" cmd_test ;;
+      1) run_action "Add-on 依赖" cmd_addon_repair ;;
+      2) run_action "本机 HA 依赖" cmd_repair ;;
+      3) run_action "环境检测" cmd_diagnose ;;
+      4) run_action "lobn_office 测试" cmd_test ;;
       0) return 0 ;;
       *) ;;
     esac
@@ -337,19 +732,23 @@ menu() {
   while true; do
     clear_screen
     cat <<EOF
-SmartCenter（中央总控）
+SmartCenter
+  生产 HA/Frigate 在 HAOS。本机菜单面向 Add-on 与固件。
+
   1) 启动
-  2) 运维
-  3) 环境检测
-  4) 教室总控固件（firmware/esphome）
+  2) 开发 ← 一键 Add-on+本机HA / 分开起
+  3) 运维
+  4) 环境
+  5) 教室总控固件
   0) 退出
 EOF
     read -r -p "> " choice
     case "$choice" in
       1) menu_start ;;
-      2) menu_ops ;;
-      3) menu_env ;;
-      4) clear_screen; cmd_esphome_flash || true; pause_back ;;
+      2) menu_dev ;;
+      3) menu_ops ;;
+      4) menu_env ;;
+      5) clear_screen; cmd_esphome_flash || true; pause_back ;;
       0) clear_screen; exit 0 ;;
       *) ;;
     esac
@@ -369,9 +768,21 @@ main() {
     restart) cmd_stop; cmd_start ;;
     status) cmd_status ;;
     logs) cmd_logs ;;
+    logs-ha) cmd_logs_ha ;;
     secrets) cmd_check_secrets ;;
     test) cmd_test ;;
     flash|esphome) cmd_esphome_flash ;;
+    all|dev-all) cmd_dev_all ;;
+    stop-all) cmd_stop_all ;;
+    addon|addon-dev|addon-full) cmd_addon_dev ;;
+    addon-api) cmd_addon_api ;;
+    addon-ui) cmd_addon_ui ;;
+    addon-ui-start) cmd_addon_ui_start ;;
+    addon-ui-build) cmd_addon_ui_build ;;
+    addon-start) cmd_addon_start ;;
+    addon-stop) cmd_addon_stop ;;
+    addon-test) cmd_addon_test ;;
+    addon-repair) cmd_addon_repair ;;
     help|-h|--help) cmd_help ;;
     *) echo "未知: $cmd"; cmd_help; exit 1 ;;
   esac
